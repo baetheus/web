@@ -1,5 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as Path from "@std/path";
+import * as Either from "@baetheus/fun/either";
+import * as Effect from "@baetheus/fun/effect";
 import * as Option from "@baetheus/fun/option";
 import * as Schemable from "@baetheus/fun/schemable";
 
@@ -254,10 +256,10 @@ Deno.test("wrap_partial_route - wraps handler and preserves method", async () =>
   const handler: Router.Handler = () => Router.text("OK");
   const partialRoute = Tokens.partial_route("POST", handler);
 
-  const middleware: Router.Middleware<unknown> =
+  const mw: Router.Middleware<unknown> =
     (next) => async (req, params, ctx) => next(req, params, ctx);
 
-  const wrapped = RouteBuilder.wrap_partial_route(partialRoute, [middleware]);
+  const wrapped = RouteBuilder.wrap_partial_route(partialRoute, [mw]);
 
   assertEquals(wrapped.method, "POST");
   assertEquals(wrapped.handler !== handler, true);
@@ -267,7 +269,7 @@ Deno.test("wrap_partial_route - wraps handler and preserves method", async () =>
 // builder tests
 // ============================================================================
 
-Deno.test("builder - throws when no plugins specified", async () => {
+Deno.test("builder - returns Left when no plugins specified", async () => {
   const fs = createMockFilesystem();
   const config: RouteBuilder.BuildConfig = {
     root_path: "/root",
@@ -276,13 +278,8 @@ Deno.test("builder - throws when no plugins specified", async () => {
     plugins: [],
   };
 
-  let threw = false;
-  try {
-    await RouteBuilder.build(config);
-  } catch (_e) {
-    threw = true;
-  }
-  assertEquals(threw, true);
+  const result = await RouteBuilder.build(config);
+  assertEquals(Either.isLeft(result), true);
 });
 
 Deno.test("builder - processes files with plugin", async () => {
@@ -293,22 +290,21 @@ Deno.test("builder - processes files with plugin", async () => {
   const processedFiles: RouteBuilder.FileEntry[] = [];
   const testPlugin: RouteBuilder.Plugin = {
     name: "TestPlugin",
-    init: () => null,
     process_file: (entry) => {
       processedFiles.push(entry);
-      return [];
+      return Effect.right([]);
     },
-    process_build: async (_state, routes) => routes as RouteBuilder.FullRoute[],
+    process_build: (_routes) => Effect.right([]),
   };
 
-  const config: RouteBuilder.RouteBuilderConfig = {
+  const config: RouteBuilder.BuildConfig = {
     root_path: "/root",
     fs,
     unsafe_import,
     plugins: [testPlugin],
   };
 
-  await RouteBuilder.builder(config).build();
+  await RouteBuilder.build(config);
 
   assertEquals(processedFiles.length, 1);
   assertEquals(processedFiles[0].relative_path, "/test.txt");
@@ -323,43 +319,45 @@ Deno.test("builder - aggregates routes from multiple plugins", async () => {
 
   const plugin1: RouteBuilder.Plugin = {
     name: "Plugin1",
-    init: () => null,
-    process_file: async (_state, entry) => [
-      RouteBuilder.full_route(
-        "Plugin1",
-        entry.parsed_path,
-        Router.route("GET", "/route1", handler),
-      ),
-    ],
-    process_build: async () => [],
+    process_file: (entry) =>
+      Effect.right([
+        RouteBuilder.full_route(
+          "Plugin1",
+          entry.parsed_path,
+          Router.route("GET", "/route1", handler),
+        ),
+      ]),
+    process_build: (_routes) => Effect.right([]),
   };
 
   const plugin2: RouteBuilder.Plugin = {
     name: "Plugin2",
-    init: () => null,
-    process_file: async (_state, entry) => [
-      RouteBuilder.full_route(
-        "Plugin2",
-        entry.parsed_path,
-        Router.route("POST", "/route2", handler),
-      ),
-    ],
-    process_build: async () => [],
+    process_file: (entry) =>
+      Effect.right([
+        RouteBuilder.full_route(
+          "Plugin2",
+          entry.parsed_path,
+          Router.route("POST", "/route2", handler),
+        ),
+      ]),
+    process_build: (_routes) => Effect.right([]),
   };
 
-  const config: RouteBuilder.RouteBuilderConfig = {
+  const config: RouteBuilder.BuildConfig = {
     root_path: "/root",
     fs,
     unsafe_import,
     plugins: [plugin1, plugin2],
   };
 
-  const result = await RouteBuilder.builder(config).build();
+  const either = await RouteBuilder.build(config);
+  assertEquals(Either.isRight(either), true);
+  if (!Either.isRight(either)) return;
 
-  assertEquals(result.site_routes.length, 2);
-  const pluginNames = result.site_routes.map((r) => r.plugin);
-  assertEquals(pluginNames.filter((n) => n === "Plugin1").length, 1);
-  assertEquals(pluginNames.filter((n) => n === "Plugin2").length, 1);
+  assertEquals(either.right.site_routes.length, 2);
+  const builderNames = either.right.site_routes.map((r) => r.builder);
+  assertEquals(builderNames.filter((n) => n === "Plugin1").length, 1);
+  assertEquals(builderNames.filter((n) => n === "Plugin2").length, 1);
 });
 
 Deno.test("builder - process_build receives all routes", async () => {
@@ -372,28 +370,28 @@ Deno.test("builder - process_build receives all routes", async () => {
 
   const plugin: RouteBuilder.Plugin = {
     name: "TestPlugin",
-    init: () => null,
-    process_file: async (_state, entry) => [
-      RouteBuilder.full_route(
-        "TestPlugin",
-        entry.parsed_path,
-        Router.route("GET", "/test", handler),
-      ),
-    ],
-    process_build: async (_state, routes) => {
+    process_file: (entry) =>
+      Effect.right([
+        RouteBuilder.full_route(
+          "TestPlugin",
+          entry.parsed_path,
+          Router.route("GET", "/test", handler),
+        ),
+      ]),
+    process_build: (routes) => {
       receivedRoutes = routes;
-      return [];
+      return Effect.right([]);
     },
   };
 
-  const config: RouteBuilder.RouteBuilderConfig = {
+  const config: RouteBuilder.BuildConfig = {
     root_path: "/root",
     fs,
     unsafe_import,
     plugins: [plugin],
   };
 
-  await RouteBuilder.builder(config).build();
+  await RouteBuilder.build(config);
 
   assertEquals(receivedRoutes.length, 1);
   assertEquals(receivedRoutes[0].route.pathname, "/test");
@@ -408,40 +406,43 @@ Deno.test("builder - process_build can add additional routes", async () => {
 
   const plugin: RouteBuilder.Plugin = {
     name: "TestPlugin",
-    init: () => null,
-    process_file: async (_state, entry) => [
-      RouteBuilder.full_route(
-        "TestPlugin",
-        entry.parsed_path,
-        Router.route("GET", "/original", handler),
-      ),
-    ],
-    process_build: async () => [
-      RouteBuilder.full_route(
-        "TestPlugin",
-        Path.parse("/generated"),
-        Router.route("GET", "/generated", handler),
-      ),
-    ],
+    process_file: (entry) =>
+      Effect.right([
+        RouteBuilder.full_route(
+          "TestPlugin",
+          entry.parsed_path,
+          Router.route("GET", "/original", handler),
+        ),
+      ]),
+    process_build: (_routes) =>
+      Effect.right([
+        RouteBuilder.full_route(
+          "TestPlugin",
+          Path.parse("/generated"),
+          Router.route("GET", "/generated", handler),
+        ),
+      ]),
   };
 
-  const config: RouteBuilder.RouteBuilderConfig = {
+  const config: RouteBuilder.BuildConfig = {
     root_path: "/root",
     fs,
     unsafe_import,
     plugins: [plugin],
   };
 
-  const result = await RouteBuilder.builder(config).build();
+  const either = await RouteBuilder.build(config);
+  assertEquals(Either.isRight(either), true);
+  if (!Either.isRight(either)) return;
 
-  assertEquals(result.site_routes.length, 2);
-  const pathnames = result.site_routes.map((r) => r.route.pathname);
+  assertEquals(either.right.site_routes.length, 2);
+  const pathnames = either.right.site_routes.map((r) => r.route.pathname);
   assertEquals(pathnames.includes("/original"), true);
   assertEquals(pathnames.includes("/generated"), true);
 });
 
 Deno.test(
-  "builder - two builds on same plugin instance yield identical routes",
+  "builder - two builds on same config yield identical routes",
   async () => {
     const fs = createMockFilesystem({
       "/root/a.ts": mockFile("export const x = 1"),
@@ -452,15 +453,15 @@ Deno.test(
 
     const plugin: RouteBuilder.Plugin = {
       name: "TestPlugin",
-      init: () => null,
-      process_file: async (_state, entry) => [
-        RouteBuilder.full_route(
-          "TestPlugin",
-          entry.parsed_path,
-          Router.route("GET", entry.relative_path, handler),
-        ),
-      ],
-      process_build: async () => [],
+      process_file: (entry) =>
+        Effect.right([
+          RouteBuilder.full_route(
+            "TestPlugin",
+            entry.parsed_path,
+            Router.route("GET", entry.relative_path, handler),
+          ),
+        ]),
+      process_build: (_routes) => Effect.right([]),
     };
 
     const config: RouteBuilder.BuildConfig = {
@@ -470,12 +471,18 @@ Deno.test(
       plugins: [plugin],
     };
 
-    const rb = RouteBuilder.build(config);
-    const result1 = await rb.build();
-    const result2 = await rb.build();
+    const either1 = await RouteBuilder.build(config);
+    const either2 = await RouteBuilder.build(config);
 
-    assertEquals(result1.site_routes.length, result2.site_routes.length);
-    assertEquals(result1.site_routes.length, 2);
+    assertEquals(Either.isRight(either1), true);
+    assertEquals(Either.isRight(either2), true);
+    if (!Either.isRight(either1) || !Either.isRight(either2)) return;
+
+    assertEquals(
+      either1.right.site_routes.length,
+      either2.right.site_routes.length,
+    );
+    assertEquals(either1.right.site_routes.length, 2);
   },
 );
 

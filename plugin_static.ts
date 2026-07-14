@@ -1,3 +1,6 @@
+import * as Effect from "@baetheus/fun/effect";
+import * as Option from "@baetheus/fun/option";
+
 import * as RouteBuilder from "./builder.ts";
 import * as Router from "./router.ts";
 
@@ -36,17 +39,14 @@ export function static_plugin(
 ): RouteBuilder.Plugin {
   return {
     name,
-    init: () => null,
-    process_file: async (_state, file_entry, config) => {
+    process_file: (file_entry) => {
       if (exclude_extensions.includes(file_entry.parsed_path.ext)) {
-        return [];
+        return Effect.right([]);
       }
-
-      const headers: HeadersInit = file_entry.mime_type
-        ? [["Content-Type", file_entry.mime_type]]
+      const headers: HeadersInit = Option.isSome(file_entry.mime_type)
+        ? [["Content-Type", file_entry.mime_type.value]]
         : [];
-
-      return [
+      return Effect.gets((config) => [
         RouteBuilder.full_route(
           name,
           file_entry.parsed_path,
@@ -75,8 +75,8 @@ export function static_plugin(
             ),
           ),
         ),
-      ];
+      ]);
     },
-    process_build: async () => [],
+    process_build: (_routes) => Effect.right([]),
   };
 }

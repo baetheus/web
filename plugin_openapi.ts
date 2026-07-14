@@ -7,11 +7,12 @@
 
 import type { Schema } from "@baetheus/fun/schemable";
 
+import * as Effect from "@baetheus/fun/effect";
 import * as JsonSchema from "@baetheus/fun/json_schema";
 
 import * as Path from "@std/path";
 
-import type * as Builder from "./builder.ts";
+import * as Builder from "./builder.ts";
 import * as Router from "./router.ts";
 
 /**
@@ -229,48 +230,47 @@ export function openapi_plugin(
 ): Builder.Plugin {
   return {
     name,
-    init: () => null,
-    process_file: async () => [],
-    process_build: async (_state, routes) => [
-      {
-        plugin: name,
-        absolute_path: path,
-        parsed_path: Path.parse(path),
-        route: Router.route(
-          "GET",
-          path,
-          () => {
-            const paths: { [path: string]: PathItemObject } = {};
+    process_file: (_entry) => Effect.right([]),
+    process_build: (routes) =>
+      Effect.right([
+        Builder.full_route(
+          name,
+          Path.parse(path),
+          Router.route(
+            "GET",
+            path,
+            () => {
+              const paths: { [path: string]: PathItemObject } = {};
 
-            for (const route of routes) {
-              if (route.plugin === name) continue;
+              for (const route of routes) {
+                if (route.builder === name) continue;
 
-              const openApiPath = convert_path_to_openapi(
-                route.route.pathname,
-              );
-              const method = method_to_lower_case(route.route.method);
-              const operation = build_operation_object(route);
+                const openApiPath = convert_path_to_openapi(
+                  route.route.pathname,
+                );
+                const method = method_to_lower_case(route.route.method);
+                const operation = build_operation_object(route);
 
-              if (!paths[openApiPath]) {
-                paths[openApiPath] = {};
+                if (!paths[openApiPath]) {
+                  paths[openApiPath] = {};
+                }
+
+                (paths[openApiPath] as { [key: string]: OperationObject })[
+                  method
+                ] = operation;
               }
 
-              (paths[openApiPath] as { [key: string]: OperationObject })[
-                method
-              ] = operation;
-            }
+              const document: OpenAPIDocument = {
+                openapi: "3.1.0",
+                info,
+                ...(servers && servers.length > 0 ? { servers } : {}),
+                paths,
+              };
 
-            const document: OpenAPIDocument = {
-              openapi: "3.1.0",
-              info,
-              ...(servers && servers.length > 0 ? { servers } : {}),
-              paths,
-            };
-
-            return Router.json(JSON.stringify(document, null, 2));
-          },
+              return Router.json(JSON.stringify(document, null, 2));
+            },
+          ),
         ),
-      },
-    ],
+      ]),
   };
 }

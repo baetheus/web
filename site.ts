@@ -45,6 +45,7 @@ import * as PluginServer from "./plugin_server.ts";
 import * as PluginStatic from "./plugin_static.ts";
 import * as PluginOpenAPI from "./plugin_openapi.ts";
 import * as Builder from "./builder.ts";
+import * as Either from "@baetheus/fun/either";
 import * as Router from "./router.ts";
 import * as DenoFS from "./deno_fs.ts";
 
@@ -121,15 +122,19 @@ export async function site(
     plugins.push(PluginOpenAPI.openapi_plugin(opts));
   }
 
-  const route_builder = await Builder.build({
+  const result = await Builder.build({
     root_path,
     fs: DenoFS.deno_fs,
     unsafe_import,
     plugins,
   });
 
+  if (Either.isLeft(result)) {
+    throw result.left;
+  }
+
   const router = Router.router(Router.context({}), {
-    routes: route_builder.site_routes.map((r) => r.route),
+    routes: result.right.site_routes.map((r) => r.route),
     middlewares,
   });
 

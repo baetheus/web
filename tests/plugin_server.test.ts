@@ -1,5 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as Path from "@std/path";
+import * as Either from "@baetheus/fun/either";
+import * as Effect from "@baetheus/fun/effect";
 import * as Option from "@baetheus/fun/option";
 
 import * as Builder from "../builder.ts";
@@ -28,7 +30,6 @@ Deno.test("server_plugin - uses custom name when provided", () => {
 });
 
 Deno.test("server_plugin - skips non-included extensions", async () => {
-  const fs = createMockFilesystem();
   const plugin = server_plugin({ include_extensions: [".ts", ".tsx"] });
 
   const fileEntry = Builder.file_entry(
@@ -39,18 +40,18 @@ Deno.test("server_plugin - skips non-included extensions", async () => {
 
   const config: Builder.BuildConfig = {
     root_path: "/root",
-    fs,
+    fs: createMockFilesystem(),
     unsafe_import,
     plugins: [plugin],
   };
 
-  const result = await plugin.process_file(fileEntry);
-
-  assertEquals(result.length, 0);
+  const either = await Effect.evaluate(config)(plugin.process_file(fileEntry));
+  assertEquals(Either.isRight(either), true);
+  if (!Either.isRight(either)) return;
+  assertEquals(either.right.length, 0);
 });
 
 Deno.test("server_plugin - process_build returns empty (no new routes)", async () => {
-  const fs = createMockFilesystem();
   const plugin = server_plugin({});
 
   const existingRoutes: Builder.SiteRoutes = [
@@ -68,12 +69,15 @@ Deno.test("server_plugin - process_build returns empty (no new routes)", async (
 
   const config: Builder.BuildConfig = {
     root_path: FIXTURES_DIR,
-    fs,
+    fs: createMockFilesystem(),
     unsafe_import,
     plugins: [plugin],
   };
 
-  const result = await plugin.process_build(existingRoutes);
-
-  assertEquals(result.length, 0);
+  const either = await Effect.evaluate(config)(
+    plugin.process_build(existingRoutes),
+  );
+  assertEquals(Either.isRight(either), true);
+  if (!Either.isRight(either)) return;
+  assertEquals(either.right.length, 0);
 });

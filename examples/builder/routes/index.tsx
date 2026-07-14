@@ -10,7 +10,7 @@ export function Home() {
           <a href="/">Home</a>
         </li>
         <li>
-          <a href="/test">Test</a>
+          <a href="/subroute">Test</a>
         </li>
       </ul>
     </>

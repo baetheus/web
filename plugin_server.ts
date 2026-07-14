@@ -1,5 +1,7 @@
 import * as D from "@baetheus/fun/decoder";
+import * as Effect from "@baetheus/fun/effect";
 import * as Either from "@baetheus/fun/either";
+import { pipe } from "@baetheus/fun/fn";
 
 import * as Router from "./router.ts";
 import * as Tokens from "./tokens.ts";
@@ -103,30 +105,28 @@ export function server_plugin(
 ): Builder.Plugin {
   return {
     name,
-    init: () => null,
-    process_file: async (_state, file_entry, config) => {
+    process_file: (file_entry) => {
       if (!include_extensions.includes(file_entry.parsed_path.ext)) {
-        return [];
+        return Effect.right([]);
       }
-
-      const exports = await Builder.safe_import(
-        file_entry.parsed_path,
-        config,
+      return pipe(
+        Builder.safe_import(file_entry.parsed_path),
+        Effect.map((exports) =>
+          Object.values(exports)
+            .filter(Tokens.is_partial_route)
+            .map((partial_route) =>
+              Builder.from_partial_route(
+                name,
+                file_entry,
+                Builder.wrap_partial_route(
+                  apply_schema_validation(partial_route),
+                  middleware,
+                ),
+              )
+            )
+        ),
       );
-
-      return Object.values(exports)
-        .filter(Tokens.is_partial_route)
-        .map((partial_route) =>
-          Builder.from_partial_route(
-            name,
-            file_entry,
-            Builder.wrap_partial_route(
-              apply_schema_validation(partial_route),
-              middleware,
-            ),
-          )
-        );
     },
-    process_build: async () => [],
+    process_build: (_routes) => Effect.right([]),
   };
 }

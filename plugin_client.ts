@@ -8,6 +8,7 @@
 import type { Style } from "./styles.ts";
 
 import * as Path from "@std/path";
+import * as Effect from "@baetheus/fun/effect";
 import * as Refinement from "@baetheus/fun/refinement";
 import { contentType } from "@std/media-types";
 import { renderToString } from "preact-render-to-string";
@@ -307,8 +308,8 @@ function create_routes(
  * Creates a client SPA plugin that processes preact components and generates
  * a bundled single-page application with client-side routing.
  *
- * Each call to `build()` on the route builder invokes `init()` to create
- * a fresh state, so consecutive builds produce identical results.
+ * All file scanning and bundling is deferred to `process_build`, which
+ * re-walks the directory to discover client exports fresh on every build.
  *
  * @example
  * ```ts
@@ -334,96 +335,108 @@ export function client_plugin(
 
   return {
     name: client_config.name,
-    init: (): ClientPluginState => ({
-      routes: [],
-      default_routes: [],
-      wrappers: [],
-      indices: [],
-      css: [],
-    }),
-    process_file: async (raw_state, file_entry, config) => {
-      if (
-        !client_config.include_extensions.includes(file_entry.parsed_path.ext)
-      ) {
-        return [];
-      }
+    process_file: (_file_entry) => Effect.right([]),
+    process_build: (_routes) =>
+      Effect.tryCatch(
+        async (config) => {
+          const state: ClientPluginState = {
+            routes: [],
+            default_routes: [],
+            wrappers: [],
+            indices: [],
+            css: [],
+          };
 
-      const state = raw_state as ClientPluginState;
-      const exports = await RouteBuilder.safe_import(
-        file_entry.parsed_path,
-        config,
-      );
-      const export_pairs = Object.entries(exports);
+          const file_entries = await config.fs.walk(config.root_path);
 
-      for (const export_pair of export_pairs) {
-        if (client_route_pair(export_pair)) {
-          state.routes.push({ file_entry, export_pair });
-        } else if (client_default_pair(export_pair)) {
-          state.default_routes.push({ file_entry, export_pair });
-        } else if (client_wrapper_pair(export_pair)) {
-          state.wrappers.push({ file_entry, export_pair });
-        } else if (client_index_pair(export_pair)) {
-          state.indices.push({ file_entry, export_pair });
-        } else if (Css.hasStyles(export_pair[1])) {
-          state.css.push({
-            file_entry,
-            export_name: export_pair[0],
-            css: export_pair[1],
+          for (const file_entry of file_entries) {
+            if (
+              !client_config.include_extensions.includes(
+                file_entry.parsed_path.ext,
+              )
+            ) {
+              continue;
+            }
+
+            let raw_import: unknown;
+            try {
+              raw_import = await config.unsafe_import(
+                "file://" + Path.format(file_entry.parsed_path),
+              );
+            } catch {
+              continue;
+            }
+
+            if (!Refinement.isRecord(raw_import)) continue;
+
+            for (const export_pair of Object.entries(raw_import)) {
+              if (client_route_pair(export_pair)) {
+                state.routes.push({ file_entry, export_pair });
+              } else if (client_default_pair(export_pair)) {
+                state.default_routes.push({ file_entry, export_pair });
+              } else if (client_wrapper_pair(export_pair)) {
+                state.wrappers.push({ file_entry, export_pair });
+              } else if (client_index_pair(export_pair)) {
+                state.indices.push({ file_entry, export_pair });
+              } else if (Css.hasStyles(export_pair[1])) {
+                state.css.push({
+                  file_entry,
+                  export_name: export_pair[0],
+                  css: export_pair[1],
+                });
+              }
+            }
+          }
+
+          if (state.default_routes.length > 1) {
+            throw RouteBuilder.build_error(
+              "Client plugin supports a maximum of 1 default route",
+            );
+          }
+          if (state.wrappers.length > 1) {
+            throw RouteBuilder.build_error(
+              "Client plugin supports a maximum of 1 application wrapper",
+            );
+          }
+          if (state.indices.length > 1) {
+            throw RouteBuilder.build_error(
+              "Client plugin supports a maximum of 1 index creator",
+            );
+          }
+
+          const entrypoint = await create_entrypoint(state, config);
+          const bundle_assets = await create_bundle_assets(entrypoint, {
+            format: "esm",
+            minify: true,
+            codeSplitting: true,
+            inlineImports: true,
+            packages: "bundle",
+            sourcemap: "linked",
+            platform: "browser",
+            ...client_config.bundler_options ?? {},
+            outputDir: config.root_path,
+            entrypoints: [entrypoint],
           });
-        }
-      }
+          const bundle_assets_with_css = await create_css_asset(
+            state,
+            bundle_assets,
+          );
+          const index_handler = create_index_handler(
+            bundle_assets_with_css,
+            state,
+            client_config.title,
+          );
 
-      return [];
-    },
-    process_build: async (raw_state, _routes, config) => {
-      const state = raw_state as ClientPluginState;
-
-      if (state.default_routes.length > 1) {
-        throw RouteBuilder.build_error(
-          "Client plugin supports a maximum of 1 default route",
-        );
-      }
-      if (state.wrappers.length > 1) {
-        throw RouteBuilder.build_error(
-          "Client plugin supports a maximum of 1 application wrapper",
-        );
-      }
-      if (state.indices.length > 1) {
-        throw RouteBuilder.build_error(
-          "Client plugin supports a maximum of 1 index creator",
-        );
-      }
-
-      const entrypoint = await create_entrypoint(state, config);
-      const bundle_assets = await create_bundle_assets(entrypoint, {
-        format: "esm",
-        minify: true,
-        codeSplitting: true,
-        inlineImports: true,
-        packages: "bundle",
-        sourcemap: "linked",
-        platform: "browser",
-        ...client_config.bundler_options ?? {},
-        outputDir: config.root_path,
-        entrypoints: [entrypoint],
-      });
-      const bundle_assets_with_css = await create_css_asset(
-        state,
-        bundle_assets,
-      );
-      const index_handler = create_index_handler(
-        bundle_assets_with_css,
-        state,
-        client_config.title,
-      );
-
-      return create_routes(
-        config,
-        index_handler,
-        state,
-        bundle_assets_with_css,
-        client_config.name,
-      );
-    },
+          return create_routes(
+            config,
+            index_handler,
+            state,
+            bundle_assets_with_css,
+            client_config.name,
+          );
+        },
+        (error) =>
+          RouteBuilder.build_error("Client plugin build failed", { error }),
+      ),
   };
 }

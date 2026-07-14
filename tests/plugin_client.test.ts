@@ -1,5 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as Path from "@std/path";
+import * as Either from "@baetheus/fun/either";
+import * as Effect from "@baetheus/fun/effect";
 import * as Option from "@baetheus/fun/option";
 
 import * as RouteBuilder from "../builder.ts";
@@ -24,8 +26,7 @@ Deno.test("client_plugin - uses custom name when provided", () => {
   assertEquals(plugin.name, "MyClientPlugin");
 });
 
-Deno.test("client_plugin - skips non-included extensions", async () => {
-  const fs = createMockFilesystem();
+Deno.test("client_plugin - process_file always returns empty routes", async () => {
   const plugin = client_plugin({ include_extensions: [".ts", ".tsx"] });
 
   const fileEntry = RouteBuilder.file_entry(
@@ -36,12 +37,13 @@ Deno.test("client_plugin - skips non-included extensions", async () => {
 
   const config: RouteBuilder.BuildConfig = {
     root_path: "/root",
-    fs,
+    fs: createMockFilesystem(),
     unsafe_import,
     plugins: [plugin],
   };
 
-  const result = await plugin.process_file(fileEntry);
-
-  assertEquals(result.length, 0);
+  const either = await Effect.evaluate(config)(plugin.process_file(fileEntry));
+  assertEquals(Either.isRight(either), true);
+  if (!Either.isRight(either)) return;
+  assertEquals(either.right.length, 0);
 });
