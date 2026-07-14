@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vertical Rhythm &mdash; @baetheus/css</title>
+    <INJECTCSS />
+  </head>
+  <body>
+    <main>
+      <article>
+        <header>
+          <h1>Vertical Rhythm</h1>
+          <p>
+            <small>
+              A worked example showing how
+              <code>@baetheus/css</code> establishes a consistent baseline grid
+              for body text and headings.
+            </small>
+          </p>
+        </header>
+
+        <section>
+          <h2>What is vertical rhythm?</h2>
+          <p>
+            Vertical rhythm is the practice of aligning every vertical
+            measurement on a page &mdash; line heights, margins, padding &mdash;
+            to a single base unit derived from body text. The result is text
+            that visually sits on a regular grid no matter how many headings,
+            paragraphs, or asides appear between sections.
+          </p>
+          <p>
+            In this example the base unit is <code>1.5rem</code>, calculated as
+            the body font size of <code>1rem</code> multiplied by a line height
+            of <code>1.5</code>. Every margin, line height, and heading size
+            below is a whole multiple of that unit. Try resizing the window or
+            adding paragraphs in the devtools and the rhythm holds.
+          </p>
+        </section>
+
+        <section>
+          <h2>Step one: define a theme</h2>
+          <p>
+            The base unit and font scale are declared once as a theme. A theme
+            is a plain object passed to <code>theme()</code>; each leaf becomes
+            a CSS custom property, and the returned value is a typed tree of
+            <code>var()</code> references.
+          </p>
+          <pre><code>import { theme } from "@baetheus/css";
+
+const vr = theme({
+  font: {
+    family: "Verdana, Geneva, sans-serif",
+    size: "1rem",
+  },
+  leading: "1.5rem",
+  scale: {
+    xs:   "0.75rem",
+    sm:   "0.875rem",
+    md:   "1rem",
+    lg:   "1.25rem",
+    xl:   "1.5rem",
+    xxl:  "2rem",
+    xxxl: "2.5rem",
+  },
+});</code></pre>
+          <p>
+            Reading <code>vr.leading</code> later returns a
+            <code>var(&minus;&minus;hash&minus;leading)</code> reference. The
+            actual values are emitted by passing the theme to
+            <code>style(":root", vr)</code>, which produces the
+            <code>:root</code> block at the top of the generated stylesheet.
+          </p>
+        </section>
+
+        <section>
+          <h2>Step two: style semantic elements</h2>
+          <p>
+            With the theme in hand, each block-level element gets a style whose
+            line height and margins are multiples of <code>vr.leading</code>.
+            The body sets the baseline; headings increase their font size while
+            keeping their line height on the grid; paragraphs reset top margin
+            and add one unit of bottom margin.
+          </p>
+          <pre><code>import { style } from "@baetheus/css";
+
+const body = style("body", {
+  fontFamily: vr.font.family,
+  fontSize:   vr.font.size,
+  lineHeight: vr.leading,
+  margin:     0,
+  padding:    `${vr.leading} calc(${vr.leading} * 2)`,
+});
+
+const h1 = style("h1", {
+  fontFamily:   vr.font.family,
+  fontSize:     vr.scale.xxxl,
+  lineHeight:   "3rem",         // 2 base units
+  fontWeight:   "bold",
+  marginTop:    "3rem",         // 2 base units
+  marginBottom: vr.leading,     // 1 base unit
+  padding:      0,
+});</code></pre>
+          <p>
+            Every heading on this page &mdash; including the
+            <code>&lt;h1&gt;</code> at the top &mdash; uses a style built
+            exactly like the one above. Because the selectors target the bare
+            elements, no class attributes are needed in the markup.
+          </p>
+        </section>
+
+        <section>
+          <h2>Step three: render the stylesheet</h2>
+          <p>
+            Individual styles are combined with <code>join()</code> and turned
+            into a CSS string by <code>render()</code>. Writing that string to a
+            <code>.css</code> file produces the stylesheet linked in this
+            page&rsquo;s <code>&lt;head&gt;</code>.
+          </p>
+          <pre><code>import { join, render } from "@baetheus/css";
+
+export const css = render(
+  join(root, body, h1, h2, h3, p, small, /* utilities... */),
+);</code></pre>
+          <p>
+            The <code>render()</code> output is deterministic and content
+            hashed, so class names stay stable across runs and the CSS can be
+            committed alongside the source.
+          </p>
+        </section>
+
+        <section>
+          <h2>The rhythm in action</h2>
+
+          <h3>Headings stay on the grid</h3>
+          <p>
+            This <code>&lt;h3&gt;</code> above uses the
+            <code>vr.scale.xl</code> font size (1.5rem) and the base line
+            height. Because both values are multiples of the base unit, the
+            heading occupies exactly one grid row.
+          </p>
+
+          <h3>Long paragraphs keep their rhythm</h3>
+          <p>
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do
+            eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim
+            ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut
+            aliquip ex ea commodo consequat. Duis aute irure dolor in
+            reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla
+            pariatur.
+          </p>
+          <p>
+            Excepteur sint occaecat cupidatat non proident, sunt in culpa qui
+            officia deserunt mollit anim id est laborum. Each line of body text
+            advances by exactly one base unit, so the bottoms of paragraphs in
+            adjacent columns &mdash; if you placed them side by side &mdash;
+            would align.
+          </p>
+
+          <h3>Small text still aligns</h3>
+          <p>
+            <small>
+              The <code>&lt;small&gt;</code> element drops the font size to
+              <code>vr.scale.sm</code> but keeps the base line height, so even
+              fine print sits on the same grid as body copy. That trick is what
+              keeps captions, footnotes, and legal text from disrupting the
+              rhythm.
+            </small>
+          </p>
+        </section>
+
+        <section>
+          <h2>Utility classes</h2>
+          <p>
+            For one-off adjustments the example exports a handful of margin and
+            text-size utilities. Each is created by calling
+            <code>style()</code> with no selector, which auto-generates a
+            content-hashed class name.
+          </p>
+          <pre><code>const mt0 = style({ marginTop: 0 });
+const mt1 = style({ marginTop: vr.leading });
+const mt2 = style({ marginTop: `calc(${vr.leading} * 2)` });
+
+const textSm = style({ fontSize: vr.scale.sm, lineHeight: vr.leading });
+const textLg = style({ fontSize: vr.scale.lg, lineHeight: vr.leading });</code></pre>
+          <p>
+            To apply one, read its generated class name with
+            <code>mt2.toString()</code> or pass several to <code>use()</code> to
+            build a space-separated string suitable for the
+            <code>class</code> attribute.
+          </p>
+        </section>
+
+        <footer>
+          <p>
+            <small>
+              This page applies no styles of its own &mdash; every margin, line
+              height, and font size visible above comes from the element
+              selectors generated by <code>examples/vertical-rhythm.ts</code>
+              and emitted to <code>examples/vertical-rhythm.css</code>.
+            </small>
+          </p>
+        </footer>
+      </article>
+    </main>
+  </body>
+</html>
