@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import * as Effect from "@baetheus/fun/effect";
 
 import * as R from "../router.ts";
 

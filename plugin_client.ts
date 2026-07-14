@@ -1,27 +1,48 @@
 /**
  * Client SPA builder for preact-based single page applications.
  *
+ * This module provides a builder that processes client-side route files
+ * and generates a bundled SPA with client-side routing using preact-iso.
+ *
  * @module
  * @since 0.3.0
  */
 
 import type { Style } from "./styles.ts";
 
-import * as Path from "@std/path";
 import * as Effect from "@baetheus/fun/effect";
+import * as Err from "@baetheus/fun/err";
+import * as Path from "@std/path";
 import * as Refinement from "@baetheus/fun/refinement";
+import { pipe } from "@baetheus/fun/fn";
 import { contentType } from "@std/media-types";
 import { renderToString } from "preact-render-to-string";
 import { h } from "preact";
 
 import * as Css from "./styles.ts";
-import * as RouteBuilder from "./builder.ts";
+import * as Builder from "./builder.ts";
 import * as Router from "./router.ts";
 import * as Tokens from "./tokens.ts";
-import { strip_extension } from "./_shared.ts";
+
+const client_plugin_error = Err.err("ClientPluginError");
 
 /**
- * Configuration options for the client SPA plugin.
+ * Configuration options for the client SPA builder.
+ *
+ * Extends Deno.bundle.Options with additional options for controlling
+ * the client build process.
+ *
+ * @example
+ * ```ts
+ * import type { ClientPluginOptions } from "@baetheus/pick/builder_client";
+ *
+ * const options: ClientPluginOptions = {
+ *   name: "MySPABuilder",
+ *   title: "My Application",
+ *   include_extensions: [".tsx"],
+ *   minify: true,
+ * };
+ * ```
  *
  * @since 0.3.0
  */
@@ -33,12 +54,12 @@ export type ClientPluginOptions = {
 };
 
 type ClientRouteEntry<T extends string, P = unknown> = {
-  readonly file_entry: RouteBuilder.FileEntry;
+  readonly file_entry: Builder.FileEntry;
   readonly export_pair: [export_name: string, Tokens.ClientPage<T, P>];
 };
 
 type CssEntry = {
-  readonly file_entry: RouteBuilder.FileEntry;
+  readonly file_entry: Builder.FileEntry;
   readonly export_name: string;
   readonly css: Style;
 };
@@ -51,24 +72,13 @@ type ClientPluginState = {
   css: CssEntry[];
 };
 
-const client_route_pair = Refinement.tuple(
-  Refinement.string,
-  Tokens.client_route.refine,
-);
-const client_default_pair = Refinement.tuple(
-  Refinement.string,
-  Tokens.client_default.refine,
-);
-const client_wrapper_pair = Refinement.tuple(
-  Refinement.string,
-  Tokens.client_wrapper.refine,
-);
-const client_index_pair = Refinement.tuple(
-  Refinement.string,
-  Tokens.client_index.refine,
-);
+function strip_extension(path: string): string {
+  const parsed_path = Path.parse(Path.normalize(path));
+  const stripped = Path.join(parsed_path.dir, parsed_path.name);
+  return stripped;
+}
 
-function generate_default_html(
+function generateDefaultHtml(
   scripts: readonly string[],
   styles: readonly string[],
   title: string,
@@ -95,118 +105,316 @@ ${scriptTags}
 </html>`;
 }
 
-function generate_entrypoint_source(state: ClientPluginState): string {
-  const lines: string[] = [
-    `import { h, render, Fragment } from "preact";`,
-    `import { LocationProvider, Router, Route, ErrorBoundary, lazy } from "preact-iso";`,
-  ];
+const client_route_pair = Refinement.tuple(
+  Refinement.string,
+  Tokens.client_route.refine,
+);
+const client_default_pair = Refinement.tuple(
+  Refinement.string,
+  Tokens.client_default.refine,
+);
+const client_wrapper_pair = Refinement.tuple(
+  Refinement.string,
+  Tokens.client_wrapper.refine,
+);
+const client_index_pair = Refinement.tuple(
+  Refinement.string,
+  Tokens.client_index.refine,
+);
 
-  if (state.wrappers.length > 0) {
-    const wrapper = state.wrappers[0];
-    lines.push(
-      `import { ${wrapper.export_pair[0]} as WrapperModule } from ${
-        JSON.stringify(wrapper.file_entry.absolute_path)
-      };`,
-    );
-  }
+// --- String Combinators for Code Generation ---
 
-  state.routes.forEach((route, index) => {
-    lines.push(
-      `const Route${index} = lazy(() => import(${
-        JSON.stringify(route.file_entry.absolute_path)
-      }).then(m => ({ default: m.${route.export_pair[0]}.component })));`,
-    );
-  });
+// Low-level string helpers
+const join = (sep: string) => (items: string[]): string => items.join(sep);
+const wrap = (prefix: string, suffix: string) => (content: string): string =>
+  `${prefix}${content}${suffix}`;
+const braces = wrap("{", "}");
+const parens = wrap("(", ")");
+const quoted = wrap('"', '"');
 
-  if (state.default_routes.length > 0) {
-    const dr = state.default_routes[0];
-    lines.push(
-      `const DefaultRoute = lazy(() => import(${
-        JSON.stringify(dr.file_entry.absolute_path)
-      }).then(m => ({ default: m.${dr.export_pair[0]}.component })));`,
-    );
-  }
+// List combinators
+const commaList = join(", ");
+const lineList = join("\n");
 
-  const wrapperComponent = state.wrappers.length > 0
-    ? "WrapperModule.component"
-    : "Fragment";
+// Property access and calls
+const prop = (obj: string, key: string): string => `${obj}.${key}`;
+const call = (fn: string, ...args: string[]): string =>
+  `${fn}${parens(commaList(args))}`;
+const methodCall = (obj: string, method: string, ...args: string[]): string =>
+  call(prop(obj, method), ...args);
 
-  const routeElems = state.routes
-    .map((r, i) =>
-      `h(Route, { path: ${
-        JSON.stringify(strip_extension(r.file_entry.relative_path))
-      }, component: Route${i} })`
-    )
-    .join(", ");
+// Expressions
+const arrow = (params: string, body: string): string =>
+  `${parens(params)} => ${body}`;
+const arrowExpr = (body: string): string => arrow("", body);
+const dynamicImport = (path: string): string => call("import", quoted(path));
+const objectLiteral = (entries: [string, string][]): string =>
+  braces(` ${commaList(entries.map(([k, v]) => `${k}: ${v}`))} `);
 
-  const defaultElem = state.default_routes.length > 0
-    ? `, h(Route, { path: "/*", component: DefaultRoute, default: true })`
-    : "";
+// Import combinators
+const namedImport = (name: string): string => name;
+const aliasedImport = (name: string, alias: string): string =>
+  `${name} as ${alias}`;
+const importList = (imports: string[]): string =>
+  braces(` ${commaList(imports)} `);
+const importDecl = (specifier: string, imports: string[]): string =>
+  `import ${importList(imports)} from ${quoted(specifier)};`;
 
-  lines.push(
-    `function App() { return h(${wrapperComponent}, null, h(LocationProvider, null, h(ErrorBoundary, null, h(Router, null, ${routeElems}${defaultElem})))); }`,
-    `render(App(), document.body);`,
+// Declaration combinators
+const constDecl = (name: string, initializer: string): string =>
+  `const ${name} = ${initializer};`;
+const funcDecl = (name: string, body: string): string =>
+  `function ${name}() { ${body} }`;
+const returnStmt = (expr: string): string => `return ${expr};`;
+const statement = (expr: string): string => `${expr};`;
+// Preact-specific combinators
+const hCall = (
+  component: string,
+  props: string,
+  ...children: string[]
+): string =>
+  children.length > 0
+    ? call("h", component, props, ...children)
+    : call("h", component, props);
+
+const lazyComponent = (path: string, exportName: string): string =>
+  call(
+    "lazy",
+    arrowExpr(
+      methodCall(
+        dynamicImport(path),
+        "then",
+        arrow(
+          "m",
+          parens(
+            objectLiteral([[
+              "default",
+              prop(prop("m", exportName), "component"),
+            ]]),
+          ),
+        ),
+      ),
+    ),
   );
 
-  return lines.join("\n");
+// Code generation functions
+function genPreactImports(): string[] {
+  return [
+    importDecl("preact", ["h", "render", "Fragment"].map(namedImport)),
+    importDecl(
+      "preact-iso",
+      [
+        "LocationProvider",
+        "Router",
+        "Route",
+        "ErrorBoundary",
+        "lazy",
+      ].map(namedImport),
+    ),
+  ];
 }
 
-async function create_entrypoint(
+function genWrapperImport(
+  wrapper: ClientRouteEntry<"ClientWrapper", Tokens.ClientWrapperParameters>,
+): string {
+  return importDecl(
+    wrapper.file_entry.absolute_path,
+    [aliasedImport(wrapper.export_pair[0], "WrapperModule")],
+  );
+}
+
+function genLazyRouteVariables(
+  routes: ClientRouteEntry<"ClientRoute">[],
+): string[] {
+  return routes.map((route, index) =>
+    constDecl(
+      `Route${index}`,
+      lazyComponent(route.file_entry.absolute_path, route.export_pair[0]),
+    )
+  );
+}
+
+function genDefaultRouteVariable(
+  defaultRoute: ClientRouteEntry<"ClientDefaultRoute">,
+): string {
+  return constDecl(
+    "DefaultRoute",
+    lazyComponent(
+      defaultRoute.file_entry.absolute_path,
+      defaultRoute.export_pair[0],
+    ),
+  );
+}
+
+function genRouteElement(path: string, component: string): string {
+  return hCall(
+    "Route",
+    objectLiteral([["path", quoted(path)], ["component", component]]),
+  );
+}
+
+function genDefaultRouteElement(): string {
+  return hCall(
+    "Route",
+    objectLiteral([
+      ["path", quoted("/*")],
+      ["component", "DefaultRoute"],
+      ["default", "true"],
+    ]),
+  );
+}
+
+function genAppFunction(state: ClientPluginState): string {
+  const wrapperComponent = state.wrappers.length > 0
+    ? prop("WrapperModule", "component")
+    : "Fragment";
+
+  const routeElements = state.routes.map((route, index) =>
+    genRouteElement(
+      strip_extension(route.file_entry.relative_path),
+      `Route${index}`,
+    )
+  );
+
+  if (state.default_routes.length > 0) {
+    routeElements.push(genDefaultRouteElement());
+  }
+
+  const routerContent = hCall("Router", "null", ...routeElements);
+  const errorBoundary = hCall("ErrorBoundary", "null", routerContent);
+  const locationProvider = hCall("LocationProvider", "null", errorBoundary);
+  const appBody = hCall(wrapperComponent, "null", locationProvider);
+
+  return funcDecl("App", returnStmt(appBody));
+}
+
+function genRenderStatement(): string {
+  return statement(call("render", call("App"), prop("document", "body")));
+}
+
+function generateEntrypointSource(state: ClientPluginState): string {
+  const lines: string[] = [];
+
+  lines.push(...genPreactImports());
+
+  if (state.wrappers.length > 0) {
+    lines.push(genWrapperImport(state.wrappers[0]));
+  }
+
+  lines.push(...genLazyRouteVariables(state.routes));
+
+  if (state.default_routes.length > 0) {
+    lines.push(genDefaultRouteVariable(state.default_routes[0]));
+  }
+
+  lines.push(genAppFunction(state));
+  lines.push(genRenderStatement());
+
+  return lineList(lines);
+}
+
+function safe_bundle(
+  bundle_options: Deno.bundle.Options,
+): Builder.BuildEffect<Deno.bundle.Result> {
+  return Effect.tryCatch(
+    async (_) => await Deno.bundle(bundle_options),
+    (err, config) =>
+      client_plugin_error("Deno.bundle threw an exception", {
+        err,
+        config,
+        bundle_options,
+      }),
+  );
+}
+
+function check_builder_state(
   state: ClientPluginState,
-  config: RouteBuilder.BuildConfig,
-): Promise<string> {
-  const tempFilePath = await config.fs.makeTempFile({
-    prefix: "bundle-",
-    suffix: ".ts",
-  });
-  const sourceText = generate_entrypoint_source(state);
-  const encoder = new TextEncoder();
-  const sourceBytes = encoder.encode(sourceText);
-  await config.fs.write(Path.parse(tempFilePath), sourceBytes);
-  return tempFilePath;
+): Builder.BuildEffect<ClientPluginState> {
+  if (state.default_routes.length > 1) {
+    return Effect.left(
+      client_plugin_error(
+        "Client builder supports a maximum of 1 default route",
+        state,
+      ),
+    );
+  }
+
+  if (state.wrappers.length > 1) {
+    return Effect.left(
+      client_plugin_error(
+        "Client builder supports a maximum of 1 application wrapper",
+        state,
+      ),
+    );
+  }
+
+  if (state.indices.length > 1) {
+    return Effect.left(
+      client_plugin_error(
+        "Client builder supports a maximum of 1 index creator",
+        state,
+      ),
+    );
+  }
+
+  return Effect.right(state);
 }
 
-async function create_bundle_assets(
+function create_entrypoint(
+  state: ClientPluginState,
+): Builder.BuildEffect<string> {
+  return Effect.gets(async (config) => {
+    const tempFilePath = await config.fs.makeTempFile({
+      prefix: "bundle-",
+      suffix: ".ts",
+    });
+    const sourceText = generateEntrypointSource(state);
+    const encoder = new TextEncoder();
+    const sourceBytes = encoder.encode(sourceText);
+    await config.fs.write(Path.parse(tempFilePath), sourceBytes);
+    return tempFilePath;
+  });
+}
+
+function create_bundle_assets(
   entrypoint: string,
   client_config: Deno.bundle.Options,
-): Promise<Map<string, Uint8Array>> {
-  let results: Deno.bundle.Result;
-  try {
-    results = await Deno.bundle({
+): Builder.BuildEffect<Map<string, Uint8Array>> {
+  return pipe(
+    safe_bundle({
       ...client_config,
       entrypoints: [entrypoint],
       write: false,
-    });
-  } catch (err) {
-    throw RouteBuilder.build_error("Deno.bundle threw an exception", {
-      error: err,
-    });
-  }
-
-  if (!results.success) {
-    throw RouteBuilder.build_error("Deno.bundle returned errors", {
-      entrypoint,
-    });
-  }
-
-  const map = new Map<string, Uint8Array>();
-  for (const file of results.outputFiles ?? []) {
-    if (file.contents !== undefined) {
-      map.set(
-        file.path === "<stdout>" ? `bundle-${file.hash}.js` : file.path,
-        file.contents,
+    }),
+    Effect.flatmap((results) => {
+      if (results.success) {
+        const map = new Map<string, Uint8Array>();
+        for (const file of results.outputFiles ?? []) {
+          if (file.contents !== undefined) {
+            map.set(
+              file.path === "<stdout>" ? `bundle-${file.hash}.js` : file.path,
+              file.contents,
+            );
+          }
+        }
+        return Effect.right(map);
+      }
+      return Effect.left(
+        client_plugin_error("Deno.bundle returned errors", {
+          results,
+          entrypoint,
+        }),
       );
-    }
-  }
-  return map;
+    }),
+  );
 }
 
-async function create_css_asset(
+function create_css_asset(
   state: ClientPluginState,
   bundle_assets: Map<string, Uint8Array>,
-): Promise<Map<string, Uint8Array>> {
+): Builder.BuildEffect<Map<string, Uint8Array>> {
   if (state.css.length === 0) {
-    return bundle_assets;
+    return Effect.right(bundle_assets);
   }
 
   const items = state.css.map((entry) => entry.css) as [Style, ...Style[]];
@@ -214,109 +422,122 @@ async function create_css_asset(
   const encoder = new TextEncoder();
   const cssBytes = encoder.encode(cssContent);
 
-  const hashBuffer = await crypto.subtle.digest("SHA-256", cssBytes);
-  const hashHex = Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, 8);
-  const cssFileName = `styles-${hashHex}.css`;
+  // Generate a hash for the CSS file name
+  const hashBuffer = new Uint8Array(cssBytes.length);
+  hashBuffer.set(cssBytes);
+  let hash = 0;
+  for (const byte of hashBuffer) {
+    hash = ((hash << 5) - hash + byte) | 0;
+  }
+  const cssFileName = `styles-${Math.abs(hash).toString(36)}.css`;
 
   bundle_assets.set(cssFileName, cssBytes);
-  return bundle_assets;
+  return Effect.right(bundle_assets);
 }
 
 function create_index_handler(
   bundle_assets: Map<string, Uint8Array>,
   state: ClientPluginState,
   title: string,
-): Router.Handler {
+): Builder.BuildEffect<Router.Handler> {
   const assets = Array.from(bundle_assets.keys());
   const scripts = assets.filter((path) => path.endsWith(".js"));
   const styles = assets.filter((path) => path.endsWith(".css"));
-  let html_content: string;
+  let html: string;
 
   if (state.indices.length > 0) {
     const index = state.indices[0];
     const IndexComponent = index.export_pair[1].component;
-    html_content = renderToString(
-      h(IndexComponent, { title, scripts, styles }),
-    );
+    html = renderToString(h(IndexComponent, {
+      title,
+      scripts,
+      styles,
+    }));
   } else {
-    html_content = generate_default_html(scripts, styles, title);
+    html = generateDefaultHtml(scripts, styles, title);
   }
-
-  return () => Router.html(html_content);
+  return Effect.wrap(
+    Effect.gets(() => Router.html(html)) as Router.Handler,
+  );
 }
 
 function create_routes(
-  config: RouteBuilder.BuildConfig,
-  index_handler: Router.Handler,
+  config: Builder.BuildConfig,
+  indexHandler: Router.Handler,
   state: ClientPluginState,
   bundle_assets: Map<string, Uint8Array>,
-  plugin_name: string,
-): RouteBuilder.FullRoute[] {
-  const routes: RouteBuilder.FullRoute[] = [];
+  builder_name: string,
+): Builder.BuildEffect<Builder.FullRoute[]> {
+  const routes: Builder.FullRoute[] = [];
 
+  // Client Root Route /
   routes.push(
-    RouteBuilder.full_route(
-      plugin_name,
+    Builder.full_route(
+      builder_name,
       Path.parse(config.root_path),
-      Router.route("GET", "/", index_handler),
+      Router.route("GET", "/", indexHandler),
     ),
   );
 
+  // Client routes for child pages - all serve index.html for SPA behavior
   for (const route of state.routes) {
     routes.push(
-      RouteBuilder.full_route(
-        plugin_name,
+      Builder.full_route(
+        builder_name,
         route.file_entry.parsed_path,
         Router.route(
           "GET",
           strip_extension(route.file_entry.relative_path),
-          index_handler,
+          indexHandler,
         ),
       ),
     );
   }
 
+  // Bundle assets - serve from memory
   for (const [assetPath, contents] of bundle_assets) {
     const parsed_path = Path.parse(Path.normalize(assetPath));
     const mimeType = contentType(parsed_path.ext);
     const assetBytes = new Uint8Array(contents);
-    const asset_handler: Router.Handler = () =>
+    const assetHandler: Router.Handler = Effect.gets(() =>
       Router.response(
         assetBytes,
         Router.response_init(
           Router.STATUS_CODE.OK,
           mimeType ? [[Router.HEADER.ContentType, mimeType]] : [],
         ),
-      );
+      )
+    );
 
     routes.push(
-      RouteBuilder.full_route(
-        plugin_name,
+      Builder.full_route(
+        builder_name,
         Path.parse(assetPath),
-        Router.route("GET", assetPath, asset_handler),
+        Router.route("GET", assetPath, assetHandler),
       ),
     );
   }
 
-  return routes;
+  return Effect.wrap(routes);
 }
 
 /**
- * Creates a client SPA plugin that processes preact components and generates
+ * Creates a client SPA builder that processes preact components and generates
  * a bundled single-page application with client-side routing.
  *
- * All file scanning and bundling is deferred to `process_build`, which
- * re-walks the directory to discover client exports fresh on every build.
+ * The builder scans for files exporting ClientPage tokens (client_route,
+ * client_default, client_wrapper, client_index) and generates:
+ * - A bundled JavaScript entrypoint with lazy-loaded routes
+ * - An HTML shell (index.html) for the SPA
+ * - Routes that serve the HTML for client-side navigation
  *
  * @example
  * ```ts
- * import { client_plugin } from "@baetheus/pick/plugin_client";
+ * import { client_plugin } from "@baetheus/pick/builder_client";
  *
- * const plugin = client_plugin({
+ * const builder = client_plugin({
  *   title: "My Application",
+ *   minify: true,
  *   include_extensions: [".tsx"],
  * });
  * ```
@@ -325,7 +546,7 @@ function create_routes(
  */
 export function client_plugin(
   _client_config: ClientPluginOptions = {},
-): RouteBuilder.Plugin {
+): Builder.Plugin {
   const client_config = {
     name: "DefaultClientPlugin",
     title: "My Site",
@@ -333,79 +554,66 @@ export function client_plugin(
     ..._client_config,
   };
 
+  // Closure state for accumulating client routes and components
+  const state: ClientPluginState = {
+    routes: [],
+    default_routes: [],
+    wrappers: [],
+    indices: [],
+    css: [],
+  };
+
   return {
     name: client_config.name,
-    process_file: (_file_entry) => Effect.right([]),
-    process_build: (_routes) =>
-      Effect.tryCatch(
-        async (config) => {
-          const state: ClientPluginState = {
-            routes: [],
-            default_routes: [],
-            wrappers: [],
-            indices: [],
-            css: [],
-          };
+    process_file: (file_entry) => {
+      // Bail on non-included extensions
+      if (
+        !client_config.include_extensions.includes(file_entry.parsed_path.ext)
+      ) {
+        return Effect.right([]);
+      }
 
-          const file_entries = await config.fs.walk(config.root_path);
+      return pipe(
+        Builder.safe_import(file_entry.parsed_path),
+        Effect.flatmap((exports) => {
+          const export_pairs = Object.entries(exports);
 
-          for (const file_entry of file_entries) {
-            if (
-              !client_config.include_extensions.includes(
-                file_entry.parsed_path.ext,
-              )
+          // Partition the exports
+          for (const export_pair of export_pairs) {
+            if (client_route_pair(export_pair)) {
+              state.routes.push({ file_entry, export_pair });
+            } else if (client_default_pair(export_pair)) {
+              state.default_routes.push({ file_entry, export_pair });
+            } else if (client_wrapper_pair(export_pair)) {
+              state.wrappers.push({ file_entry, export_pair });
+            } else if (client_index_pair(export_pair)) {
+              state.indices.push({ file_entry, export_pair });
+            } else if (
+              Css.hasStyles(export_pair[1])
             ) {
-              continue;
-            }
-
-            let raw_import: unknown;
-            try {
-              raw_import = await config.unsafe_import(
-                "file://" + Path.format(file_entry.parsed_path),
-              );
-            } catch {
-              continue;
-            }
-
-            if (!Refinement.isRecord(raw_import)) continue;
-
-            for (const export_pair of Object.entries(raw_import)) {
-              if (client_route_pair(export_pair)) {
-                state.routes.push({ file_entry, export_pair });
-              } else if (client_default_pair(export_pair)) {
-                state.default_routes.push({ file_entry, export_pair });
-              } else if (client_wrapper_pair(export_pair)) {
-                state.wrappers.push({ file_entry, export_pair });
-              } else if (client_index_pair(export_pair)) {
-                state.indices.push({ file_entry, export_pair });
-              } else if (Css.hasStyles(export_pair[1])) {
-                state.css.push({
-                  file_entry,
-                  export_name: export_pair[0],
-                  css: export_pair[1],
-                });
-              }
+              state.css.push({
+                file_entry,
+                export_name: export_pair[0],
+                css: export_pair[1],
+              });
             }
           }
 
-          if (state.default_routes.length > 1) {
-            throw RouteBuilder.build_error(
-              "Client plugin supports a maximum of 1 default route",
-            );
-          }
-          if (state.wrappers.length > 1) {
-            throw RouteBuilder.build_error(
-              "Client plugin supports a maximum of 1 application wrapper",
-            );
-          }
-          if (state.indices.length > 1) {
-            throw RouteBuilder.build_error(
-              "Client plugin supports a maximum of 1 index creator",
-            );
-          }
-
-          const entrypoint = await create_entrypoint(state, config);
-          const bundle_assets = await create_bundle_assets(entrypoint, {
+          // Return empty routes during process_file; routes created in process_build
+          return Effect.right([]);
+        }),
+      );
+    },
+    process_build: (_routes) =>
+      pipe(
+        Effect.get<[Builder.BuildConfig]>(),
+        Effect.map((config) => config[0]),
+        Effect.bindTo("config"),
+        Effect.bind("state", () => check_builder_state(state)),
+        Effect.bind("entrypoint", ({ state }) => create_entrypoint(state)),
+        Effect.bind("bundle_assets", ({ config, entrypoint }) =>
+          create_bundle_assets(entrypoint, {
+            // Defaults
             format: "esm",
             minify: true,
             codeSplitting: true,
@@ -413,30 +621,34 @@ export function client_plugin(
             packages: "bundle",
             sourcemap: "linked",
             platform: "browser",
+            // Custom overrides
             ...client_config.bundler_options ?? {},
+            // Requirements
             outputDir: config.root_path,
             entrypoints: [entrypoint],
-          });
-          const bundle_assets_with_css = await create_css_asset(
-            state,
-            bundle_assets,
-          );
-          const index_handler = create_index_handler(
+          })),
+        Effect.bind("bundle_assets_with_css", ({ bundle_assets, state }) =>
+          create_css_asset(state, bundle_assets)),
+        Effect.bind("indexHandler", ({ bundle_assets_with_css, state }) =>
+          create_index_handler(
             bundle_assets_with_css,
             state,
             client_config.title,
-          );
-
-          return create_routes(
-            config,
-            index_handler,
-            state,
-            bundle_assets_with_css,
-            client_config.name,
-          );
-        },
-        (error) =>
-          RouteBuilder.build_error("Client plugin build failed", { error }),
+          )),
+        Effect.bind(
+          "routes",
+          ({ config, indexHandler, state, bundle_assets_with_css }) =>
+            create_routes(
+              config,
+              indexHandler,
+              state,
+              bundle_assets_with_css,
+              client_config.name,
+            ),
+        ),
+        Effect.map(({ routes }) =>
+          routes
+        ),
       ),
   };
 }

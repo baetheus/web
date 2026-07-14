@@ -1,6 +1,11 @@
 import type { StatusCode, StatusText } from "./status.ts";
 import type { Header } from "./unstable-header.ts";
 
+import * as Effect from "@baetheus/fun/effect";
+import * as Either from "@baetheus/fun/either";
+import * as Record from "@baetheus/fun/record";
+import { identity, pipe } from "@baetheus/fun/fn";
+
 import { HEADER } from "./unstable-header.ts";
 import { STATUS_CODE, STATUS_TEXT } from "./status.ts";
 
@@ -423,11 +428,11 @@ export function context<D = unknown>(
  *
  * @since 0.1.0
  */
-export type Handler<D = unknown, P = Params> = (
-  req: Request,
-  params: P,
-  ctx: Ctx<D>,
-) => Response | Promise<Response>;
+export type Handler<D = unknown, P = unknown> = Effect.Effect<
+  [Request, P, Ctx<D>],
+  Response,
+  Response
+>;
 
 /**
  * Represents a complete route definition in the router system.
@@ -514,17 +519,13 @@ export function route<D>(
  */
 export function handle<D, R extends RouteString>(
   route_string: R,
-  handler: (
-    request: Request,
-    path: ParsePath<R>,
-    ctx: Ctx<D>,
-  ) => Response | Promise<Response>,
+  handler: Handler<D>,
 ): Route<D> {
   const [method, path_name] = route_string.split(" ") as [Methods, string];
   return route(
     method,
     path_name,
-    handler as Handler<D>,
+    handler,
   );
 }
 
@@ -602,6 +603,15 @@ function sort_routes<D>(routes: Route<D>[]): void {
   });
 }
 
+const extract_response = Either.match(identity<Response>, identity<Response>);
+
+function create_route_map<D>(): { [K in Methods]: Route<D>[] } {
+  return pipe(
+    METHODS,
+    Record.map(() => [] as Route<D>[]),
+  ) as { [K in Methods]: Route<D>[] };
+}
+
 /**
  * Creates a new router instance with the specified shared state and initial routes.
  *
@@ -629,43 +639,59 @@ export function router<D>(
     default_handler = () => text("Not Found", STATUS_CODE.NotFound),
   }: Partial<RouterConfig<D>>,
 ): Router {
-  const apply_middleware = (h: Handler<D>): Handler<D> =>
-    middlewares.reduce((acc, mw) => mw(acc), h);
+  // Sort routes by method to avoid needles URLPattern.exec
+  const route_map = create_route_map<D>();
 
-  const route_map = new Map<string, Route<D>[]>();
-  for (const r of routes) {
-    const wrapped: Route<D> = {
-      ...r,
-      handler: apply_middleware(r.handler),
-    };
-    const bucket = route_map.get(r.method) ?? [];
-    bucket.push(wrapped);
-    route_map.set(r.method, bucket);
-  }
-  for (const bucket of route_map.values()) {
-    sort_routes(bucket);
-  }
-
-  const wrapped_default = apply_middleware(
-    (_req, _params, _ctx) => default_handler(_req),
+  // Wrap all routes in middleware
+  const wrap_handler = (h: Handler<D>, m: Middleware<D>): Handler<D> => m(h);
+  const wrap_route = (
+    { method, pathname, url_pattern, handler }: Route<D>,
+  ): Route<D> => {
+    const new_handler = middlewares.reduce(wrap_handler, handler);
+    return { method, pathname, url_pattern, handler: new_handler };
+  };
+  const default_route = wrap_route(
+    route("GET", "/*", Effect.gets(default_handler)),
   );
 
+  for (const route of routes) {
+    const wrapped_route = wrap_route(route);
+    route_map[wrapped_route.method].push(wrapped_route);
+  }
+
+  // Return the Router
   return {
     async handle(request) {
       try {
-        const method = request.method.toUpperCase();
-        const routes = route_map.get(method) ?? [];
-        for (const r of routes) {
-          const pattern_result = r.url_pattern.exec(request.url);
+        // The fallback here isn't necessary but is extra extra safe.
+        const routes = route_map[request.method.toUpperCase() as Methods] ?? [];
+
+        // Use the first route we find that exec's correctly
+        for (const route of routes) {
+          const pattern_result = route.url_pattern.exec(request.url);
           if (pattern_result !== null) {
-            const params = extract_params(pattern_result);
-            return await r.handler(request, params, ctx);
+            const [result] = await route.handler(
+              request,
+              pattern_result,
+              ctx,
+            );
+            return extract_response(result);
           }
         }
-        return await wrapped_default(request, {}, ctx);
+
+        // Otherwise use the default handler
+        const [result] = await default_route.handler(
+          request,
+          {} as URLPatternResult,
+          ctx,
+        );
+        return extract_response(result);
       } catch (e) {
         ctx.logger.fatal(e);
-        return text("Internal Server Error", STATUS_CODE.InternalServerError);
+        return text(
+          "Internal Server Error",
+          STATUS_CODE.InternalServerError,
+        );
       }
     },
   };

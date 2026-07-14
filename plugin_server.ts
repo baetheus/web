@@ -33,10 +33,10 @@ export function apply_schema_validation(
       const decoder = params_schema(D.SchemableDecoder);
       const result = decoder(params);
       if (Either.isLeft(result)) {
-        return Router.text(
+        return [Either.left(Router.text(
           D.draw(result.left),
           Router.STATUS_CODE.BadRequest,
-        );
+        ))];
       }
       decoded_params = result.right;
     }
@@ -48,22 +48,23 @@ export function apply_schema_validation(
         try {
           raw = await req.json();
         } catch {
-          return Router.text(
+          return [Either.left(Router.text(
             "Invalid JSON body",
             Router.STATUS_CODE.BadRequest,
-          );
+          ))];
         }
         const decoder = body_schema(D.SchemableDecoder);
         const result = decoder(raw);
         if (Either.isLeft(result)) {
-          return Router.text(
+          return [Either.left(Router.text(
             D.draw(result.left),
             Router.STATUS_CODE.BadRequest,
-          );
+          ))];
         }
         decoded_body = result.right;
       }
-      return schema_handler(req, decoded_params, decoded_body, ctx);
+      const response = await schema_handler(req, decoded_params, decoded_body, ctx);
+      return [Either.right(response)];
     }
 
     // Plain handler with only params validation

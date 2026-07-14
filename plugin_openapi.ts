@@ -1,6 +1,9 @@
 /**
  * OpenAPI 3.1.0 specification builder for Pick routes.
  *
+ * This module provides a build-phase-only builder that generates an OpenAPI
+ * specification from SiteRoutes and serves it at a configurable path.
+ *
  * @module
  * @since 0.4.0
  */
@@ -9,10 +12,11 @@ import type { Schema } from "@baetheus/fun/schemable";
 
 import * as Effect from "@baetheus/fun/effect";
 import * as JsonSchema from "@baetheus/fun/json_schema";
+import * as Schemable from "@baetheus/fun/schemable";
 
 import * as Path from "@std/path";
 
-import * as Builder from "./builder.ts";
+import type * as Builder from "./builder.ts";
 import * as Router from "./router.ts";
 
 /**
@@ -37,17 +41,38 @@ export type OpenAPIServer = {
 };
 
 /**
- * Configuration options for the OpenAPI plugin.
+ * Configuration options for the OpenAPI builder.
+ *
+ * @example
+ * ```ts
+ * import type { OpenAPIBuilderOptions } from "@baetheus/pick/builder_openapi";
+ *
+ * const options: OpenAPIBuilderOptions = {
+ *   name: "MyOpenAPIBuilder",
+ *   path: "/api/openapi.json",
+ *   info: {
+ *     title: "My API",
+ *     version: "1.0.0",
+ *     description: "My API description",
+ *   },
+ *   servers: [{ url: "https://api.example.com" }],
+ * };
+ * ```
  *
  * @since 0.4.0
  */
-export type OpenAPIPluginOptions = {
+export type OpenAPIBuilderOptions = {
   readonly name?: string;
   readonly path?: string;
   readonly info: OpenAPIInfo;
   readonly servers?: readonly OpenAPIServer[];
 };
 
+/**
+ * OpenAPI Parameter Object (simplified).
+ *
+ * @since 0.4.0
+ */
 type ParameterObject = {
   readonly name: string;
   readonly in: "path" | "query" | "header" | "cookie";
@@ -56,6 +81,11 @@ type ParameterObject = {
   readonly description?: string;
 };
 
+/**
+ * OpenAPI Request Body Object (simplified).
+ *
+ * @since 0.4.0
+ */
 type RequestBodyObject = {
   readonly required?: boolean;
   readonly content: {
@@ -65,6 +95,11 @@ type RequestBodyObject = {
   };
 };
 
+/**
+ * OpenAPI Response Object (simplified).
+ *
+ * @since 0.4.0
+ */
 type ResponseObject = {
   readonly description: string;
   readonly content?: {
@@ -74,6 +109,11 @@ type ResponseObject = {
   };
 };
 
+/**
+ * OpenAPI Operation Object (simplified).
+ *
+ * @since 0.4.0
+ */
 type OperationObject = {
   readonly operationId?: string;
   readonly summary?: string;
@@ -85,6 +125,11 @@ type OperationObject = {
   };
 };
 
+/**
+ * OpenAPI Path Item Object (simplified).
+ *
+ * @since 0.4.0
+ */
 type PathItemObject = {
   readonly get?: OperationObject;
   readonly post?: OperationObject;
@@ -95,9 +140,14 @@ type PathItemObject = {
   readonly options?: OperationObject;
 };
 
-type JsonSchemaType = {
+/**
+ * JSON Schema (simplified subset for OpenAPI 3.1.0).
+ *
+ * @since 0.4.0
+ */
+type JsonSchema = {
   readonly type?: string;
-  readonly properties?: { readonly [key: string]: JsonSchemaType };
+  readonly properties?: { readonly [key: string]: JsonSchema };
   readonly items?: JsonSchema.JsonSchema;
   readonly required?: readonly string[];
   readonly description?: string;
@@ -106,6 +156,11 @@ type JsonSchemaType = {
   readonly $ref?: string;
 };
 
+/**
+ * OpenAPI 3.1.0 Document.
+ *
+ * @since 0.4.0
+ */
 type OpenAPIDocument = {
   readonly openapi: "3.1.0";
   readonly info: OpenAPIInfo;
@@ -113,22 +168,55 @@ type OpenAPIDocument = {
   readonly paths: { readonly [path: string]: PathItemObject };
 };
 
-function convert_path_to_openapi(pathname: string): string {
+/**
+ * Converts a Pick pathname with `:param` syntax to OpenAPI `{param}` syntax.
+ *
+ * @example
+ * ```ts
+ * convertPathToOpenAPI("/users/:id"); // "/users/{id}"
+ * convertPathToOpenAPI("/posts/:postId/comments/:commentId"); // "/posts/{postId}/comments/{commentId}"
+ * ```
+ *
+ * @since 0.4.0
+ */
+function convertPathToOpenAPI(pathname: string): string {
   return pathname.replace(/:([^/]+)/g, "{$1}");
 }
 
-function extract_path_parameters(pathname: string): string[] {
+/**
+ * Extracts path parameter names from a Pick pathname.
+ *
+ * @example
+ * ```ts
+ * extractPathParameters("/users/:id"); // ["id"]
+ * extractPathParameters("/posts/:postId/comments/:commentId"); // ["postId", "commentId"]
+ * ```
+ *
+ * @since 0.4.0
+ */
+function extractPathParameters(pathname: string): string[] {
   const matches = pathname.match(/:([^/]+)/g);
   if (!matches) return [];
   return matches.map((m) => m.slice(1));
 }
 
-function schema_to_json_schema<A>(schema: Schema<A>): JsonSchema.JsonSchema {
+/**
+ * Converts a @baetheus/fun/schemable Schema to a JSON Schema object.
+ * This is a basic implementation that handles common schema types.
+ *
+ * @since 0.4.0
+ */
+function schemaToJsonSchema<A>(schema: Schema<A>): JsonSchema.JsonSchema {
   const JsonBuilder = schema(JsonSchema.SchemableJsonBuilder);
   return JsonSchema.print(JsonBuilder);
 }
 
-function method_to_lower_case(
+/**
+ * Converts an HTTP method to lowercase for OpenAPI path item keys.
+ *
+ * @since 0.4.0
+ */
+function methodToLowerCase(
   method: Router.Methods,
 ): "get" | "post" | "put" | "delete" | "patch" | "head" | "options" {
   const lower = method.toLowerCase();
@@ -139,10 +227,16 @@ function method_to_lower_case(
   ) {
     return lower;
   }
+  // Fallback for WebDAV and other methods - treat as GET for OpenAPI purposes
   return "get";
 }
 
-function generate_operation_id(method: string, pathname: string): string {
+/**
+ * Generates an operation ID from the route method and pathname.
+ *
+ * @since 0.4.0
+ */
+function generateOperationId(method: string, pathname: string): string {
   const sanitizedPath = pathname
     .replace(/^\//, "")
     .replace(/[{}:]/g, "")
@@ -151,11 +245,15 @@ function generate_operation_id(method: string, pathname: string): string {
   return `${method.toLowerCase()}_${sanitizedPath || "root"}`;
 }
 
-function build_operation_object(
-  route: Builder.FullRoute,
-): OperationObject {
-  const pathParams = extract_path_parameters(route.route.pathname);
+/**
+ * Builds an OpenAPI operation object from a FullRoute.
+ *
+ * @since 0.4.0
+ */
+function buildOperationObject(route: Builder.FullRoute): OperationObject {
+  const pathParams = extractPathParameters(route.route.pathname);
 
+  // Build parameters array
   const parameters: ParameterObject[] = pathParams.map((name) => ({
     name,
     in: "path" as const,
@@ -163,20 +261,18 @@ function build_operation_object(
     schema: { type: "string" },
   }));
 
-  const requestBody = route.body_schema
-    ? {
-      required: true,
-      content: {
-        "application/json": {
-          schema: schema_to_json_schema(route.body_schema),
-        },
+  // Build request body if body_schema is present
+  const requestBody = {
+    required: true,
+    content: {
+      "application/json": {
+        schema: schemaToJsonSchema(route.body_schema),
       },
-    } as RequestBodyObject
-    : undefined;
+    },
+  };
 
-  const responseSchema = route.output_schema
-    ? schema_to_json_schema(route.output_schema)
-    : undefined;
+  // Build response object
+  const responseSchema = schemaToJsonSchema(route.output_schema);
 
   const responses: { [statusCode: string]: ResponseObject } = {
     "200": {
@@ -194,10 +290,7 @@ function build_operation_object(
   };
 
   return {
-    operationId: generate_operation_id(
-      route.route.method,
-      route.route.pathname,
-    ),
+    operationId: generateOperationId(route.route.method, route.route.pathname),
     parameters: parameters.length > 0 ? parameters : undefined,
     requestBody,
     responses,
@@ -205,61 +298,76 @@ function build_operation_object(
 }
 
 /**
- * Creates an OpenAPI plugin that generates an OpenAPI 3.1.0 specification
+ * Creates an OpenAPI builder that generates an OpenAPI 3.1.0 specification
  * from all routes and serves it at a configurable path.
+ *
+ * This is a build-phase-only builder - it doesn't process individual files,
+ * but instead receives all routes from other builders in `process_build`
+ * and generates a single route serving the OpenAPI spec.
  *
  * @example
  * ```ts
- * import { openapi_plugin } from "@baetheus/pick/plugin_openapi";
+ * import { openapi_builder } from "@baetheus/pick/builder_openapi";
  *
- * const plugin = openapi_plugin({
- *   info: { title: "My API", version: "1.0.0" },
- *   servers: [{ url: "https://api.example.com" }],
+ * const builder = openapi_builder({
+ *   info: {
+ *     title: "My API",
+ *     version: "1.0.0",
+ *     description: "My awesome API",
+ *   },
+ *   servers: [
+ *     { url: "https://api.example.com", description: "Production" },
+ *   ],
  * });
  * ```
  *
  * @since 0.4.0
  */
-export function openapi_plugin(
+export function openapi_builder(
   {
-    name = "OpenAPIPlugin",
+    name = "OpenAPIBuilder",
     path = "/openapi.json",
     info,
     servers,
-  }: OpenAPIPluginOptions,
+  }: OpenAPIBuilderOptions,
 ): Builder.Plugin {
   return {
     name,
-    process_file: (_entry) => Effect.right([]),
+    // Build-phase only - no file processing
+    process_file: () => Effect.right([]),
     process_build: (routes) =>
       Effect.right([
-        Builder.full_route(
-          name,
-          Path.parse(path),
-          Router.route(
+        {
+          builder: name,
+          absolute_path: path,
+          parsed_path: Path.parse(path),
+          route: Router.route(
             "GET",
             path,
-            () => {
+            Effect.gets(() => {
+              // Build paths object from routes
               const paths: { [path: string]: PathItemObject } = {};
 
               for (const route of routes) {
+                // Skip the OpenAPI route itself
                 if (route.builder === name) continue;
 
-                const openApiPath = convert_path_to_openapi(
-                  route.route.pathname,
-                );
-                const method = method_to_lower_case(route.route.method);
-                const operation = build_operation_object(route);
+                const openApiPath = convertPathToOpenAPI(route.route.pathname);
+                const method = methodToLowerCase(route.route.method);
+                const operation = buildOperationObject(route);
 
+                // Initialize path item if needed
                 if (!paths[openApiPath]) {
                   paths[openApiPath] = {};
                 }
 
+                // Add operation to path item (need to cast to mutable)
                 (paths[openApiPath] as { [key: string]: OperationObject })[
                   method
                 ] = operation;
               }
 
+              // Build the OpenAPI document
               const document: OpenAPIDocument = {
                 openapi: "3.1.0",
                 info,
@@ -268,9 +376,12 @@ export function openapi_plugin(
               };
 
               return Router.json(JSON.stringify(document, null, 2));
-            },
+            }),
           ),
-        ),
+          params_schema: Schemable.schema((s) => s.unknown()),
+          body_schema: Schemable.schema((s) => s.unknown()),
+          output_schema: Schemable.schema((s) => s.unknown()),
+        },
       ]),
   };
 }

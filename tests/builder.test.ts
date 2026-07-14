@@ -127,7 +127,7 @@ Deno.test("file_entry - creates FileEntry with leading slash", () => {
   assertEquals(entry.relative_path, "/dir/file.ts");
   assertEquals(entry.absolute_path, "/root/dir/file.ts");
   assertEquals(entry.parsed_path, parsed);
-  assertEquals(entry.mime_type, undefined);
+  assertEquals(entry.mime_type, Option.none);
 });
 
 Deno.test("file_entry - preserves leading slash if present", () => {

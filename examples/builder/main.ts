@@ -23,13 +23,15 @@ const logging_middleware = middleware((handler) => {
 async function main() {
   const handler = await site({
     site_name: "Example Site",
-    root_path: "./routes",
+    root_path: new URL("./routes", import.meta.url).pathname,
     unsafe_import: (path) => import(path),
     middlewares: [logging_middleware],
   });
 
   const result = Deno.serve(handler);
-  console.log(`Server started at ${result.addr}`);
+  const binding =
+    `${result.addr.transport}://${result.addr.hostname}:${result.addr.port}`;
+  console.log(`Server started at ${binding}`);
 }
 
 await main();

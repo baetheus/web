@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
 import type { Schema } from "@baetheus/fun/schemable";
+import * as Either from "@baetheus/fun/either";
+import * as Effect from "@baetheus/fun/effect";
+import { identity, pipe } from "@baetheus/fun/fn";
 
 import * as Router from "../router.ts";
 import * as Tokens from "../tokens.ts";
@@ -21,6 +24,12 @@ function json_request(body: unknown, method = "POST"): Request {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+function extract(
+  [er]: [Either.Either<Response, Response>, ...unknown[]],
+): Response {
+  return pipe(er, Either.match(identity, identity));
 }
 
 // ============================================================================
@@ -45,7 +54,7 @@ Deno.test("body validation - happy path delivers decoded body to handler", async
     ctx,
   );
 
-  assertEquals(response.status, 200);
+  assertEquals(extract(response).status, 200);
   assertEquals(captured_body, { name: "Alice" });
 });
 
@@ -62,7 +71,7 @@ Deno.test("body validation - 400 on malformed JSON", async () => {
   });
 
   const response = await validated.handler(req, {}, ctx);
-  assertEquals(response.status, 400);
+  assertEquals(extract(response).status, 400);
 });
 
 Deno.test("body validation - 400 on schema mismatch", async () => {
@@ -78,14 +87,16 @@ Deno.test("body validation - 400 on schema mismatch", async () => {
     ctx,
   );
 
-  assertEquals(response.status, 400);
-  const text = await response.text();
+  assertEquals(extract(response).status, 400);
+  const text = await extract(response).text();
   // Error message should reference the missing field
   assertEquals(text.includes("name") || text.length > 0, true);
 });
 
 Deno.test("body validation - no-op when no body_schema", async () => {
-  const partial = Tokens.post((_req, _params, _ctx) => Router.text("ok"));
+  const partial = Tokens.post(
+    Effect.gets((_req, _params, _ctx) => Router.text("ok")),
+  );
   const validated = apply_schema_validation(partial);
 
   // handler should be unchanged (same reference)
@@ -114,7 +125,7 @@ Deno.test("params validation - decoded params passed to schema handler", async (
     ctx,
   );
 
-  assertEquals(response.status, 200);
+  assertEquals(extract(response).status, 200);
   assertEquals(captured_params, { id: "99" });
 });
 
@@ -132,7 +143,7 @@ Deno.test("params validation - 400 on schema mismatch", async () => {
     ctx,
   );
 
-  assertEquals(response.status, 400);
+  assertEquals(extract(response).status, 400);
 });
 
 // ============================================================================
@@ -160,7 +171,7 @@ Deno.test("combined - both params and body decoded on valid request", async () =
     ctx,
   );
 
-  assertEquals(response.status, 200);
+  assertEquals(extract(response).status, 200);
   assertEquals(captured_params, { id: "7" });
   assertEquals(captured_body, { name: "Bob" });
 });
