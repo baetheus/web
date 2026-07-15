@@ -54,10 +54,11 @@ import * as DenoFS from "./deno_fs.ts";
  *
  * @since 0.1.0
  */
-export type SiteOptions = {
+export type SiteOptions<D> = {
   readonly root_path: string;
   readonly site_name: string;
   readonly unsafe_import: (path: string) => Promise<unknown>;
+  readonly state: D;
   readonly middlewares?: Router.Middleware<unknown>[];
   /** Enable the client SPA plugin. Pass options or `false` to disable. Default: `true`. */
   readonly client?: boolean | PluginClient.ClientPluginOptions;
@@ -82,13 +83,14 @@ export type SiteOptions = {
  *
  * @since 0.1.0
  */
-export async function site(
-  options: SiteOptions,
+export async function site<D>(
+  options: SiteOptions<D>,
 ): Promise<Router.Router["handle"]> {
   const {
     root_path,
     site_name,
     unsafe_import,
+    state,
     middlewares = [],
     client = true,
     server = true,
@@ -133,7 +135,7 @@ export async function site(
     throw result.left;
   }
 
-  const router = Router.router(Router.context({}), {
+  const router = Router.router(Router.context(state), {
     routes: result.right.site_routes.map((r) => r.route),
     middlewares,
   });

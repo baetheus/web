@@ -1,6 +1,6 @@
 {
   "name": "@tub/web",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "tasks": {
     "examples": "deno run --allow-net --allow-write --allow-read examples/main.ts"
   },
