@@ -148,13 +148,18 @@ console.log(render(join(roboto, themeColor, thumbs)));
 ### Render Options
 
 ```ts
-import { MINIMAL_RENDER_OPTIONS, render, STANDARD_RENDER_OPTIONS, style } from "@tub/web";
+import {
+  MINIMAL_RENDER_OPTIONS,
+  render,
+  STANDARD_RENDER_OPTIONS,
+  style,
+} from "@tub/web";
 
 const button = style({ color: "blue" });
 
-console.log(render(button));                          // human-readable
+console.log(render(button)); // human-readable
 console.log(render(button, STANDARD_RENDER_OPTIONS)); // same as default
-console.log(render(button, MINIMAL_RENDER_OPTIONS));  // minified
+console.log(render(button, MINIMAL_RENDER_OPTIONS)); // minified
 ```
 
 ### Reusable Properties
@@ -202,7 +207,8 @@ callbacks, and automagical conventions. `@tub/web` takes a different approach:
 1. No templating tools or magic project setup.
 2. Builds directly on `Deno.ServeHandler` and web standards.
 3. Type-safe path parameter parsing at the type level.
-4. Composes well enough to implement both SSR and autodocumenting API frameworks.
+4. Composes well enough to implement both SSR and autodocumenting API
+   frameworks.
 
 ### Manual Router
 
@@ -212,8 +218,9 @@ import { context, handle, html, router } from "@tub/web/router";
 const app = router(context({}), {
   routes: [
     handle("GET /", () => html("<h1>Welcome!</h1>")),
-    handle("GET /users/:id", (_, params) =>
-      html(`<h1>User: ${params.id}</h1>`)
+    handle(
+      "GET /users/:id",
+      (_, params) => html(`<h1>User: ${params.id}</h1>`),
     ),
   ],
 });
@@ -269,11 +276,13 @@ then returns a request handler ready for `Deno.serve`.
 ```ts
 import { site } from "@tub/web";
 
-Deno.serve(await site({
-  root_path: "./src/routes",
-  site_name: "My Application",
-  unsafe_import: (path) => import(path),
-}));
+Deno.serve(
+  await site({
+    root_path: "./src/routes",
+    site_name: "My Application",
+    unsafe_import: (path) => import(path),
+  }),
+);
 ```
 
 ### Advanced: Plugins Directly
@@ -388,9 +397,9 @@ const log = middleware((next) => async (req, params, ctx) => {
 
 ### Tokens (`@tub/web/tokens`)
 
-Method builders for route files: `get`, `post`, `put`, `del`, `patch`,
-`head`, `options`. Each accepts a plain handler or a config object with
-`params`, `body`, `output`, and `handler`.
+Method builders for route files: `get`, `post`, `put`, `del`, `patch`, `head`,
+`options`. Each accepts a plain handler or a config object with `params`,
+`body`, `output`, and `handler`.
 
 Client page factories for SPA builds: `client_route`, `client_default`,
 `client_index`, `client_wrapper`.
@@ -418,7 +427,8 @@ Client page factories for SPA builds: `client_route`, `client_default`,
   the CSS API design, particularly `style`, theming patterns
 - [Sass](https://sass-lang.com/) — Influence on nesting and selector composition
 - [fp-ts](https://gcanti.github.io/fp-ts/) — Functional programming patterns
-- [Oxide Computer Company's Dropshot](https://github.com/oxidecomputer/dropshot) — Inspiration for autodocumenting API design
+- [Oxide Computer Company's Dropshot](https://github.com/oxidecomputer/dropshot)
+  — Inspiration for autodocumenting API design
 
 ## Contributing
 

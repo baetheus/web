@@ -255,8 +255,8 @@ Deno.test("wrap_partial_route - wraps handler and preserves method", async () =>
   const handler: Router.Handler = Effect.gets(() => Router.text("OK"));
   const partialRoute = Tokens.partial_route("POST", handler);
 
-  const mw: Router.Middleware<unknown> =
-    (next) => async (req, params, ctx) => next(req, params, ctx);
+  const mw: Router.Middleware<unknown> = (next) => async (req, params, ctx) =>
+    next(req, params, ctx);
 
   const wrapped = RouteBuilder.wrap_partial_route(partialRoute, [mw]);
 
