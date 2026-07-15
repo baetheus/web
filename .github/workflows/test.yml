@@ -6,7 +6,7 @@ jobs:
   test:
     strategy:
       matrix:
-        deno: ["v2.6.10"]
+        deno: ["v2.7.14"]
         # os: [macOS-latest, windows-latest, ubuntu-latest]
         os: [macOS-latest, ubuntu-latest]
 
