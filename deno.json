@@ -30,5 +30,8 @@
     "csstype": "npm:csstype@^3.2.3",
     "preact": "npm:preact@^10.29.7",
     "preact-render-to-string": "npm:preact-render-to-string@^6.7.0"
-  }
+  },
+  "exclude": [
+    "examples/"
+  ]
 }
