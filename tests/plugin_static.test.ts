@@ -86,12 +86,7 @@ Deno.test("static_plugin - process_build returns empty (no new routes)", async (
     Builder.full_route(
       "OtherPlugin",
       Path.parse("/other/route.ts"),
-      {
-        method: "GET",
-        pathname: "/other",
-        url_pattern: new URLPattern({ pathname: "/other" }),
-        handler: () => new Response("OK"),
-      },
+      Router.right("GET /other", () => new Response("OK")),
     ),
   ];
 
@@ -139,7 +134,14 @@ Deno.test("static_plugin - route handler reads file content", async () => {
   const req = new Request("http://localhost/styles.css");
   const ctx = Router.context({});
 
-  const response = await routes[0].route.handler(req, {}, ctx);
+  const [handler_result] = await routes[0].route.handler(
+    req,
+    {} as URLPatternResult,
+    ctx,
+  );
+  const response = Either.isRight(handler_result)
+    ? handler_result.right
+    : handler_result.left;
 
   const body = await response.text();
   assertEquals(body, fileContent);
@@ -177,7 +179,14 @@ Deno.test("static_plugin - sets Content-Type header from mime_type", async () =>
   const req = new Request("http://localhost/image.png");
   const ctx = Router.context({});
 
-  const response = await routes[0].route.handler(req, {}, ctx);
+  const [handler_result] = await routes[0].route.handler(
+    req,
+    {} as URLPatternResult,
+    ctx,
+  );
+  const response = Either.isRight(handler_result)
+    ? handler_result.right
+    : handler_result.left;
   assertEquals(response.headers.get("Content-Type"), "image/png");
 });
 

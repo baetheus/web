@@ -5,6 +5,7 @@ import * as Effect from "@baetheus/fun/effect";
 import * as Option from "@baetheus/fun/option";
 
 import * as Builder from "../builder.ts";
+import * as Router from "../router.ts";
 import { server_plugin } from "../plugin_server.ts";
 import { createMockFilesystem } from "./builder.test.ts";
 
@@ -58,12 +59,7 @@ Deno.test("server_plugin - process_build returns empty (no new routes)", async (
     Builder.full_route(
       "OtherPlugin",
       Path.parse("/other.ts"),
-      {
-        method: "GET",
-        pathname: "/other",
-        url_pattern: new URLPattern({ pathname: "/other" }),
-        handler: () => new Response("OK"),
-      },
+      Router.right("GET /other", () => new Response("OK")),
     ),
   ];
 

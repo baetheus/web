@@ -45,10 +45,10 @@ export type OpenAPIServer = {
  *
  * @example
  * ```ts
- * import type { OpenAPIBuilderOptions } from "@baetheus/pick/builder_openapi";
+ * import type { OpenAPIPluginOptions } from "@baetheus/pick/builder_openapi";
  *
- * const options: OpenAPIBuilderOptions = {
- *   name: "MyOpenAPIBuilder",
+ * const options: OpenAPIPluginOptions = {
+ *   name: "MyOpenAPIPlugin",
  *   path: "/api/openapi.json",
  *   info: {
  *     title: "My API",
@@ -61,7 +61,7 @@ export type OpenAPIServer = {
  *
  * @since 0.4.0
  */
-export type OpenAPIBuilderOptions = {
+export type OpenAPIPluginOptions = {
   readonly name?: string;
   readonly path?: string;
   readonly info: OpenAPIInfo;
@@ -307,9 +307,9 @@ function buildOperationObject(route: Builder.FullRoute): OperationObject {
  *
  * @example
  * ```ts
- * import { openapi_builder } from "@baetheus/pick/builder_openapi";
+ * import { openapi_plugin } from "@baetheus/pick/builder_openapi";
  *
- * const builder = openapi_builder({
+ * const builder = openapi_plugin({
  *   info: {
  *     title: "My API",
  *     version: "1.0.0",
@@ -323,13 +323,13 @@ function buildOperationObject(route: Builder.FullRoute): OperationObject {
  *
  * @since 0.4.0
  */
-export function openapi_builder(
+export function openapi_plugin(
   {
-    name = "OpenAPIBuilder",
+    name = "OpenAPIPlugin",
     path = "/openapi.json",
     info,
     servers,
-  }: OpenAPIBuilderOptions,
+  }: OpenAPIPluginOptions,
 ): Builder.Plugin {
   return {
     name,

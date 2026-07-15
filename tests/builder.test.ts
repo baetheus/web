@@ -154,9 +154,8 @@ Deno.test("file_entry - includes mime type when provided", () => {
 
 Deno.test("full_route - creates FullRoute with correct properties", () => {
   const parsed = Path.parse("/root/api/users.ts");
-  const handler: Router.Handler = () => Router.text("OK");
   const schemable_unknown = Schemable.schema((s) => s.unknown());
-  const r = Router.route("GET", "/api/users", handler);
+  const r = Router.right("GET /api/users", () => Router.text("OK"));
 
   const fullRoute = RouteBuilder.full_route(
     "TestPlugin",
@@ -180,7 +179,7 @@ Deno.test("full_route - creates FullRoute with correct properties", () => {
 Deno.test("from_partial_route - converts PartialRoute to FullRoute", () => {
   const parsed = Path.parse("/root/api/hello.ts");
   const fileEntry = RouteBuilder.file_entry(parsed, "/api/hello", Option.none);
-  const handler: Router.Handler = () => Router.text("Hello");
+  const handler: Router.Handler = Effect.gets(() => Router.text("Hello"));
   const partialRoute = Tokens.partial_route("GET", handler);
 
   const fullRoute = RouteBuilder.from_partial_route(
@@ -200,10 +199,10 @@ Deno.test("from_partial_route - converts PartialRoute to FullRoute", () => {
 Deno.test("wrap_handler - applies middleware in order", async () => {
   const calls: string[] = [];
 
-  const baseHandler: Router.Handler = () => {
+  const baseHandler: Router.Handler = Effect.gets(() => {
     calls.push("handler");
     return Router.text("OK");
-  };
+  });
 
   const middleware1: Router.Middleware<unknown> =
     (next) => async (req, params, ctx) => {
@@ -227,7 +226,7 @@ Deno.test("wrap_handler - applies middleware in order", async () => {
   ]);
 
   const req = new Request("http://localhost/test");
-  const params: Router.Params = {};
+  const params = {} as URLPatternResult;
   const ctx = Router.context({});
 
   await wrapped(req, params, ctx);
@@ -242,7 +241,7 @@ Deno.test("wrap_handler - applies middleware in order", async () => {
 });
 
 Deno.test("wrap_handler - returns original handler with empty middleware", () => {
-  const handler: Router.Handler = () => Router.text("OK");
+  const handler: Router.Handler = Effect.gets(() => Router.text("OK"));
   const wrapped = RouteBuilder.wrap_handler(handler, []);
 
   assertEquals(wrapped, handler);
@@ -253,7 +252,7 @@ Deno.test("wrap_handler - returns original handler with empty middleware", () =>
 // ============================================================================
 
 Deno.test("wrap_partial_route - wraps handler and preserves method", async () => {
-  const handler: Router.Handler = () => Router.text("OK");
+  const handler: Router.Handler = Effect.gets(() => Router.text("OK"));
   const partialRoute = Tokens.partial_route("POST", handler);
 
   const mw: Router.Middleware<unknown> =
@@ -315,8 +314,6 @@ Deno.test("builder - aggregates routes from multiple plugins", async () => {
     "/root/file.ts": mockFile("export const x = 1"),
   });
 
-  const handler: Router.Handler = () => Router.text("OK");
-
   const plugin1: RouteBuilder.Plugin = {
     name: "Plugin1",
     process_file: (entry) =>
@@ -324,7 +321,7 @@ Deno.test("builder - aggregates routes from multiple plugins", async () => {
         RouteBuilder.full_route(
           "Plugin1",
           entry.parsed_path,
-          Router.route("GET", "/route1", handler),
+          Router.right("GET /route1", () => Router.text("OK")),
         ),
       ]),
     process_build: (_routes) => Effect.right([]),
@@ -337,7 +334,7 @@ Deno.test("builder - aggregates routes from multiple plugins", async () => {
         RouteBuilder.full_route(
           "Plugin2",
           entry.parsed_path,
-          Router.route("POST", "/route2", handler),
+          Router.right("POST /route2", () => Router.text("OK")),
         ),
       ]),
     process_build: (_routes) => Effect.right([]),
@@ -365,7 +362,6 @@ Deno.test("builder - process_build receives all routes", async () => {
     "/root/file.ts": mockFile("export const x = 1"),
   });
 
-  const handler: Router.Handler = () => Router.text("OK");
   let receivedRoutes: RouteBuilder.SiteRoutes = [];
 
   const plugin: RouteBuilder.Plugin = {
@@ -375,7 +371,7 @@ Deno.test("builder - process_build receives all routes", async () => {
         RouteBuilder.full_route(
           "TestPlugin",
           entry.parsed_path,
-          Router.route("GET", "/test", handler),
+          Router.right("GET /test", () => Router.text("OK")),
         ),
       ]),
     process_build: (routes) => {
@@ -402,8 +398,6 @@ Deno.test("builder - process_build can add additional routes", async () => {
     "/root/file.ts": mockFile("export const x = 1"),
   });
 
-  const handler: Router.Handler = () => Router.text("OK");
-
   const plugin: RouteBuilder.Plugin = {
     name: "TestPlugin",
     process_file: (entry) =>
@@ -411,7 +405,7 @@ Deno.test("builder - process_build can add additional routes", async () => {
         RouteBuilder.full_route(
           "TestPlugin",
           entry.parsed_path,
-          Router.route("GET", "/original", handler),
+          Router.right("GET /original", () => Router.text("OK")),
         ),
       ]),
     process_build: (_routes) =>
@@ -419,7 +413,7 @@ Deno.test("builder - process_build can add additional routes", async () => {
         RouteBuilder.full_route(
           "TestPlugin",
           Path.parse("/generated"),
-          Router.route("GET", "/generated", handler),
+          Router.right("GET /generated", () => Router.text("OK")),
         ),
       ]),
   };
@@ -449,7 +443,7 @@ Deno.test(
       "/root/b.ts": mockFile("export const y = 2"),
     });
 
-    const handler: Router.Handler = () => Router.text("OK");
+    const handler: Router.Handler = Effect.gets(() => Router.text("OK"));
 
     const plugin: RouteBuilder.Plugin = {
       name: "TestPlugin",

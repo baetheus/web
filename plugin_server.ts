@@ -28,7 +28,7 @@ export function apply_schema_validation(
   }
 
   const validated_handler: Router.Handler = async (req, params, ctx) => {
-    let decoded_params: unknown = params;
+    let decoded_params = params;
     if (params_schema) {
       const decoder = params_schema(D.SchemableDecoder);
       const result = decoder(params);
@@ -38,7 +38,7 @@ export function apply_schema_validation(
           Router.STATUS_CODE.BadRequest,
         ))];
       }
-      decoded_params = result.right;
+      decoded_params = result.right as URLPatternResult;
     }
 
     if (schema_handler) {
@@ -63,12 +63,17 @@ export function apply_schema_validation(
         }
         decoded_body = result.right;
       }
-      const response = await schema_handler(req, decoded_params, decoded_body, ctx);
+      const response = await schema_handler(
+        req,
+        decoded_params,
+        decoded_body,
+        ctx,
+      );
       return [Either.right(response)];
     }
 
     // Plain handler with only params validation
-    return partial.handler(req, decoded_params as Router.Params, ctx);
+    return partial.handler(req, decoded_params, ctx);
   };
 
   return { ...partial, handler: validated_handler };

@@ -100,7 +100,7 @@ Deno.test("route parses method, pathname and builds URLPattern", () => {
   const r = R.route(
     "GET",
     "/users/:id",
-    (() => new Response("ok")) as R.Handler<unknown>,
+    Effect.gets(() => new Response("ok")),
   );
   assertEquals(r.method, "GET");
   assertEquals(r.pathname, "/users/:id");
@@ -109,8 +109,10 @@ Deno.test("route parses method, pathname and builds URLPattern", () => {
 });
 
 Deno.test("handle creates a successful route that router handles", async () => {
-  const rt = R.handle("GET /hi", () => new Response("hi"));
-  const app = R.router(R.context({}, R.NOOP_LOGGER), { routes: [rt] });
+  const rt = R.right("GET /hi", () => new Response("hi"));
+  const app = R.router(R.context({}, R.NOOP_LOGGER), {
+    routes: [rt],
+  });
   const res = await app.handle(
     new Request("http://localhost/hi", { method: "GET" }),
   );
@@ -119,7 +121,10 @@ Deno.test("handle creates a successful route that router handles", async () => {
 });
 
 Deno.test("handle returns non-2xx responses correctly", async () => {
-  const rt = R.handle("GET /oops", () => new Response("bad", { status: 400 }));
+  const rt = R.right(
+    "GET /oops",
+    () => new Response("bad", { status: 400 }),
+  );
   const app = R.router(R.context({}, R.NOOP_LOGGER), { routes: [rt] });
   const res = await app.handle(
     new Request("http://localhost/oops", { method: "GET" }),
@@ -138,7 +143,7 @@ Deno.test("router returns default 404 when no route matches", async () => {
 });
 
 Deno.test("middleware executes for matching route", async () => {
-  const base = R.handle("GET /m", () => new Response("base"));
+  const base = R.right("GET /m", () => new Response("base"));
   let called = false;
   const mw = R.middleware<unknown>((next) => async (req, params, ctx) => {
     called = true;
@@ -156,7 +161,7 @@ Deno.test("middleware executes for matching route", async () => {
 });
 
 Deno.test("router catches thrown exceptions and returns 500 Internal Server Error", async () => {
-  const throwingRoute = R.handle("GET /throw", () => {
+  const throwingRoute = R.right("GET /throw", () => {
     throw new Error("Something went wrong!");
   });
   const app = R.router(R.context({}, R.NOOP_LOGGER), {
@@ -170,7 +175,10 @@ Deno.test("router catches thrown exceptions and returns 500 Internal Server Erro
 });
 
 Deno.test("router uses default handler for unknown HTTP method", async () => {
-  const getRoute = R.handle("GET /test", () => new Response("get response"));
+  const getRoute = R.right(
+    "GET /test",
+    () => new Response("get response"),
+  );
   const customDefault = () => new Response("custom default", { status: 404 });
   const app = R.router(R.context({}, R.NOOP_LOGGER), {
     routes: [getRoute],
@@ -187,9 +195,9 @@ Deno.test("router uses default handler for unknown HTTP method", async () => {
 });
 
 Deno.test("handle extracts :id param from URL", async () => {
-  const rt = R.handle(
+  const rt = R.right(
     "GET /users/:id",
-    (_req, params) => new Response(params.id as string),
+    (_req, params) => new Response(params.id),
   );
   const app = R.router(R.context({}, R.NOOP_LOGGER), { routes: [rt] });
   const res = await app.handle(
@@ -199,7 +207,7 @@ Deno.test("handle extracts :id param from URL", async () => {
 });
 
 Deno.test("handle extracts multiple named params from URL", async () => {
-  const rt = R.handle(
+  const rt = R.right(
     "GET /blog/:year/:month/:slug",
     (_req, params) =>
       new Response(`${params.year}/${params.month}/${params.slug}`),
@@ -212,26 +220,23 @@ Deno.test("handle extracts multiple named params from URL", async () => {
 });
 
 Deno.test("handle extracts wildcard as readonly string array", async () => {
-  const rt = R.handle(
-    "GET /files/*",
-    (_req, params) => {
-      const segments = params["0"] as readonly string[];
-      return new Response(segments.join(","));
-    },
+  const rt = R.right(
+    "GET /files/*/a/*",
+    (_req, params) => new Response(params["0"]),
   );
   const app = R.router(R.context({}, R.NOOP_LOGGER), { routes: [rt] });
   const res = await app.handle(
-    new Request("http://localhost/files/a/b/c", { method: "GET" }),
+    new Request("http://localhost/files/asdf/a/b/c/d", { method: "GET" }),
   );
-  assertEquals(await res.text(), "a,b,c");
+  assertEquals(await res.text(), "asdf");
 });
 
 Deno.test("static route wins over parameterized regardless of registration order", async () => {
-  const paramRoute = R.handle(
+  const paramRoute = R.right(
     "GET /users/:id",
-    (_req, params) => new Response(`param:${params.id}`),
+    (_req, params) => new Response(params.id),
   );
-  const staticRoute = R.handle("GET /users/me", () => new Response("me"));
+  const staticRoute = R.right("GET /users/me", () => new Response("me"));
   // Register parameterized first — static should still win
   const app = R.router(R.context({}, R.NOOP_LOGGER), {
     routes: [paramRoute, staticRoute],

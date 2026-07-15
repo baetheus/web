@@ -50,7 +50,7 @@ Deno.test("body validation - happy path delivers decoded body to handler", async
   const validated = apply_schema_validation(partial);
   const response = await validated.handler(
     json_request({ name: "Alice" }),
-    {},
+    {} as URLPatternResult,
     ctx,
   );
 
@@ -70,7 +70,7 @@ Deno.test("body validation - 400 on malformed JSON", async () => {
     body: "not { valid",
   });
 
-  const response = await validated.handler(req, {}, ctx);
+  const response = await validated.handler(req, {} as URLPatternResult, ctx);
   assertEquals(extract(response).status, 400);
 });
 
@@ -83,7 +83,7 @@ Deno.test("body validation - 400 on schema mismatch", async () => {
   const validated = apply_schema_validation(partial);
   const response = await validated.handler(
     json_request({ wrong_field: 42 }),
-    {},
+    {} as URLPatternResult,
     ctx,
   );
 
@@ -121,7 +121,7 @@ Deno.test("params validation - decoded params passed to schema handler", async (
   const validated = apply_schema_validation(partial);
   const response = await validated.handler(
     new Request("http://localhost/items/99"),
-    { id: "99" },
+    { id: "99" } as unknown as URLPatternResult,
     ctx,
   );
 
@@ -139,7 +139,7 @@ Deno.test("params validation - 400 on schema mismatch", async () => {
   // Pass params that don't satisfy the schema (missing 'id')
   const response = await validated.handler(
     new Request("http://localhost/items"),
-    {},
+    {} as URLPatternResult,
     ctx,
   );
 
@@ -167,7 +167,7 @@ Deno.test("combined - both params and body decoded on valid request", async () =
   const validated = apply_schema_validation(partial);
   const response = await validated.handler(
     json_request({ name: "Bob" }, "PUT"),
-    { id: "7" },
+    { id: "7" } as unknown as URLPatternResult,
     ctx,
   );
 

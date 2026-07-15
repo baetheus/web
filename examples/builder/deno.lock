@@ -2,11 +2,15 @@
   "version": "5",
   "specifiers": {
     "jsr:@baetheus/fun@^3.0.0-rc.9": "3.0.0-rc.9",
+    "jsr:@std/assert@^1.0.19": "1.0.19",
     "jsr:@std/fs@^1.0.24": "1.0.24",
+    "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
     "jsr:@std/media-types@^1.1.0": "1.1.0",
     "jsr:@std/path@^1.1.5": "1.1.6",
     "jsr:@std/path@^1.1.6": "1.1.6",
+    "npm:csstype@^3.2.3": "3.2.3",
+    "npm:preact-iso@^2.12.0": "2.12.0_preact@10.29.7__preact-render-to-string@6.7.0_preact-render-to-string@6.7.0__preact@10.29.7",
     "npm:preact-render-to-string@^6.7.0": "6.7.0_preact@10.29.7",
     "npm:preact@^10.29.7": "10.29.7_preact-render-to-string@6.7.0"
   },
@@ -14,10 +18,16 @@
     "@baetheus/fun@3.0.0-rc.9": {
       "integrity": "a8ed38c7997532e425e928ca6c5e7b44449aed787bf1f328e5d5f208129f2009"
     },
+    "@std/assert@1.0.19": {
+      "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.12"
+      ]
+    },
     "@std/fs@1.0.24": {
       "integrity": "f3061b45b81673a2bece689da041df32d174be064c89eb6397fb5718d3fb7877",
       "dependencies": [
-        "jsr:@std/internal",
+        "jsr:@std/internal@^1.0.14",
         "jsr:@std/path@^1.1.5"
       ]
     },
@@ -30,11 +40,21 @@
     "@std/path@1.1.6": {
       "integrity": "c68485c2a4dfbb5ae3cc74fae4e8c4e5d874cf8a8ed12927917235c758b46cbe",
       "dependencies": [
-        "jsr:@std/internal"
+        "jsr:@std/internal@^1.0.14"
       ]
     }
   },
   "npm": {
+    "csstype@3.2.3": {
+      "integrity": "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="
+    },
+    "preact-iso@2.12.0_preact@10.29.7__preact-render-to-string@6.7.0_preact-render-to-string@6.7.0__preact@10.29.7": {
+      "integrity": "sha512-k0Y44UONBJ1zBXXCBhJRAa5O4ww8a5FHdLD6l21IxcnsTmDBto4n7KPQAH6xqegsKDMX4SuJ02qItiUlciIlZQ==",
+      "dependencies": [
+        "preact",
+        "preact-render-to-string"
+      ]
+    },
     "preact-render-to-string@6.7.0_preact@10.29.7": {
       "integrity": "sha512-Z4WR8fmLMRpdYqJ9i7vrlXSsSrxVJydwrkEXHapexfARbWfGb7vGcnvNQnIzN0cXciMVOlz/XLoiMCi9gUsy9Q==",
       "dependencies": [
@@ -52,6 +72,10 @@
     }
   },
   "workspace": {
+    "dependencies": [
+      "npm:preact-iso@^2.12.0",
+      "npm:preact@^10.29.7"
+    ],
     "links": {
       "jsr:@tub/web@0.0.1": {
         "dependencies": [
